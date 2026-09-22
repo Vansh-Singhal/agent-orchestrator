@@ -1925,9 +1925,19 @@ type SendConversationMessageRequest struct {
 	Text string `json:"text"`
 	// ClientMessageID makes delivery idempotent. A retry carrying the same value
 	// must not produce a second provider turn.
-	ClientMessageID string                               `json:"clientMessageId,omitempty"`
-	Attachments     []ConversationImageContentRequest    `json:"attachments,omitempty"`
-	Resources       []ConversationResourceContentRequest `json:"resources,omitempty"`
+	ClientMessageID string                                `json:"clientMessageId,omitempty"`
+	Attachments     []ConversationImageContentRequest     `json:"attachments,omitempty"`
+	Resources       []ConversationResourceContentRequest  `json:"resources,omitempty"`
+	Excerpts        []ConversationExcerptReferenceRequest `json:"excerpts,omitempty"`
+}
+
+// ConversationExcerptReferenceRequest attaches verified selected transcript
+// text to the next message.
+type ConversationExcerptReferenceRequest struct {
+	ConversationID string `json:"conversationId"`
+	MessageID      string `json:"messageId"`
+	Revision       int64  `json:"revision"`
+	Text           string `json:"text"`
 }
 
 // ConversationImageContentRequest is a native raster image prompt block.
@@ -2332,6 +2342,7 @@ type ConversationSnapshotResponse struct {
 	Messages                         []ConversationMessageResponse     `json:"messages"`
 	Activities                       []ConversationActivityResponse    `json:"activities"`
 	BranchPoints                     []ConversationBranchPointResponse `json:"branchPoints,omitempty"`
+	SideChats                        []ConversationSideChatResponse    `json:"sideChats,omitempty"`
 	// BranchMaterialization says whether the selected provider branch preserved
 	// native history or was rebuilt from AO's bounded text transcript. Omitted for
 	// conversations that have no durable branch metadata yet.
@@ -2387,6 +2398,29 @@ type ConversationSnapshotResponse struct {
 type ConversationBranchMaterializationResponse struct {
 	Strategy        string `json:"strategy" enum:"native,approximate_context"`
 	ReplayTruncated bool   `json:"replayTruncated"`
+}
+
+// CreateConversationSideChatRequest optionally names a new /btw thread.
+type CreateConversationSideChatRequest struct {
+	Label string `json:"label,omitempty" maxLength:"80"`
+}
+
+// CreateConversationSideChatResponse identifies the newly active side branch.
+type CreateConversationSideChatResponse struct {
+	ID                string `json:"id"`
+	ParentBranchID    string `json:"parentBranchId"`
+	Label             string `json:"label"`
+	ForkAfterSequence int64  `json:"forkAfterSequence"`
+}
+
+// ConversationSideChatResponse is one durable /btw thread.
+type ConversationSideChatResponse struct {
+	ID                string `json:"id"`
+	ParentBranchID    string `json:"parentBranchId"`
+	Label             string `json:"label"`
+	ForkAfterSequence int64  `json:"forkAfterSequence"`
+	Active            bool   `json:"active"`
+	CreatedAt         string `json:"createdAt"`
 }
 
 // ConversationBranchPointResponse describes sibling continuations at one prompt.

@@ -54,6 +54,7 @@ type Store interface {
 	ConversationForSession(ctx context.Context, session domain.SessionID) (domain.ConversationRecord, error)
 	ClaimChatControllerGeneration(ctx context.Context, session domain.SessionID, generation string) error
 	ConversationBranch(ctx context.Context, conversationID, branchID string) (domain.ConversationBranch, error)
+	ConversationBranches(ctx context.Context, conversationID string) ([]domain.ConversationBranch, error)
 	ConversationEditAnchor(ctx context.Context, conversationID, replacedTurnID string) (domain.ConversationEditAnchor, error)
 	RepairIncompleteConversationEdit(ctx context.Context, sessionID domain.SessionID, conversationID string, now time.Time) (domain.ConversationBranch, bool, error)
 	CreateAndActivateConversationBranch(ctx context.Context, sessionID domain.SessionID, branch domain.ConversationBranch, generation string, now time.Time) error
@@ -64,6 +65,7 @@ type Store interface {
 	AppendImportedUserMessage(ctx context.Context, conversationID, providerTurnID string, msg domain.ConversationMessage, now time.Time) error
 
 	AppendUserMessage(ctx context.Context, conversationID string, session domain.SessionID, generation string, msg domain.ConversationMessage, turnID string, now time.Time) (bool, error)
+	ConversationMessageByID(ctx context.Context, conversationID, messageID string) (domain.ConversationMessage, bool, error)
 	ConversationMessageByClientID(ctx context.Context, conversationID, clientMessageID string) (domain.ConversationMessage, bool, error)
 	AppendRetryUserMessage(ctx context.Context, conversationID string, session domain.SessionID, generation string, msg domain.ConversationMessage, turnID, retryOfTurnID string, now time.Time) (bool, error)
 	BindTurnToProvider(ctx context.Context, turnID, providerTurnID string, now time.Time) error
@@ -1530,7 +1532,8 @@ func retryPromptContent(raw string, capabilities ports.ChatCapabilities) ([]port
 			if item.URI == "" {
 				return nil, fmt.Errorf("%w: embedded resources require a URI", ErrRetryContentInvalid)
 			}
-			if !capabilities.Has(ports.ChatCapabilityEmbeddedContext) {
+			if !capabilities.Has(ports.ChatCapabilityEmbeddedContext) &&
+				!strings.HasPrefix(item.URI, ports.ChatExcerptResourceURIPrefix) {
 				return nil, fmt.Errorf("%w: embedded resources are unsupported", ErrRetryUnsupported)
 			}
 		case "resource_link":
@@ -1630,6 +1633,7 @@ func (c *Controller) dispatch(
 	// setting that only applied when the user pressed send would silently stop
 	// applying exactly when they were not watching.
 	msg.Settings = c.turnSettings()
+	msg = excerptDeliveryMessage(msg, c.Capabilities())
 
 	c.mu.Lock()
 	c.dispatchingTurnID = turnID
@@ -1709,6 +1713,36 @@ func (c *Controller) dispatch(
 		State:              domain.TurnStateRunning,
 		RequestedAt:        requestedAt,
 	}, nil
+}
+
+// excerptDeliveryMessage preserves verified excerpts as structured resources for
+// capable providers and renders them into deterministic prompt text otherwise.
+// The durable message still retains the original resource blocks for retry and
+// transcript provenance.
+func excerptDeliveryMessage(msg ports.ChatUserMessage, capabilities ports.ChatCapabilities) ports.ChatUserMessage {
+	if capabilities.Has(ports.ChatCapabilityEmbeddedContext) {
+		return msg
+	}
+	content := make([]ports.ChatContent, 0, len(msg.Content))
+	var fallback strings.Builder
+	for _, item := range msg.Content {
+		if item.Type != "resource" || !strings.HasPrefix(item.URI, ports.ChatExcerptResourceURIPrefix) {
+			content = append(content, item)
+			continue
+		}
+		fallback.WriteString("\n\nReferenced chat excerpt")
+		if item.Name != "" {
+			fallback.WriteString(" (")
+			fallback.WriteString(item.Name)
+			fallback.WriteString(")")
+		}
+		fallback.WriteString(":\n---\n")
+		fallback.WriteString(item.Text)
+		fallback.WriteString("\n---")
+	}
+	msg.Content = content
+	msg.Text += fallback.String()
+	return msg
 }
 
 // drain sends the next queued message now that the agent is free.

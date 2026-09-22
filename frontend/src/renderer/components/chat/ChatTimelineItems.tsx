@@ -528,7 +528,12 @@ export function HumanMessage({
 }) {
 	const { body, attachments } = stagedAttachmentParts(message.text);
 	return (
-		<div className="group/message flex flex-col items-end gap-1">
+		<div
+			className="group/message flex flex-col items-end gap-1"
+			data-chat-message-id={!queued && !editing ? message.id : undefined}
+			data-chat-message-revision={!queued && !editing ? message.revision : undefined}
+			data-chat-message-role={!queued && !editing ? message.role : undefined}
+		>
 			{/* A queued message reads as not-yet-sent rather than as sent-and-ignored:
 			    the agent has not seen it, and the timeline should not imply it has. */}
 			{editing ? (
@@ -744,7 +749,12 @@ export function AssistantMessage({
 	const hasDuration = durationMs !== undefined && durationMs > 0;
 	const showActions = !renderingStreaming && (showCopy || Boolean(onRollback) || hasDuration);
 	return (
-		<div className="group/message relative">
+		<div
+			className="group/message relative"
+			data-chat-message-id={!renderingStreaming ? message.id : undefined}
+			data-chat-message-revision={!renderingStreaming ? message.revision : undefined}
+			data-chat-message-role={!renderingStreaming ? message.role : undefined}
+		>
 			<ChatMarkdown text={visibleText} streaming={renderingStreaming} />
 			{showActions ? (
 				// One action row for the completed answer, not one after every prose

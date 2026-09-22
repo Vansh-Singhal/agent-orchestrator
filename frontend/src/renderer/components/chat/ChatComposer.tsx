@@ -46,7 +46,7 @@ import {
 	type ReactElement,
 	type ReactNode,
 } from "react";
-import { ArrowUp, Loader2, Plus, Square, X } from "lucide-react";
+import { ArrowUp, Loader2, MessageSquareQuote, Plus, Square, X } from "lucide-react";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "../../lib/utils";
@@ -86,11 +86,13 @@ import {
 	readChatSessionDraft,
 	subscribeChatDraftRuntime,
 	writeChatAttachments,
+	writeChatExcerptReferences,
 	writeChatComposerText,
 	type ChatDraftMutationToken,
 	type ChatComposerDelivery,
 	type ChatDraftScope,
 	type ChatDraftAttachment,
+	type ChatDraftExcerptReference,
 	type ChatDraftRetainedAttachment,
 	type DraftClearResult,
 } from "../../lib/chat-drafts";
@@ -184,6 +186,7 @@ export const ChatComposer = memo(function ChatComposer({
 		attachments?: FileAttachmentPayload[],
 		clientMessageId?: string,
 		retainedContent?: number[],
+		excerpts?: ChatDraftExcerptReference[],
 	) => void | Promise<unknown>;
 	settings?: ReactNode;
 	/** A provider decision that temporarily replaces ordinary message entry. */
@@ -354,6 +357,9 @@ export const ChatComposer = memo(function ChatComposer({
 		getComposerMutation,
 		getComposerMutation,
 	);
+	const contextReferences = draftScope
+		? readChatSessionDraft(draftScope).composer.excerpts ?? []
+		: [];
 	const [appliedAcceptanceSequence, setAppliedAcceptanceSequence] = useState(0);
 	const composerRevision = useRef(persistedDraft?.composer.revision ?? 0);
 	const synchronouslyClearedDeliveryRevision = useRef<number | undefined>(undefined);
@@ -462,7 +468,7 @@ export const ChatComposer = memo(function ChatComposer({
 
 	const staged = fileAttachments.attachments.length > 0 || visibleRetainedAttachments.length > 0;
 	const controlsDisabled = Boolean(disabled || submitting);
-	const hasDraft = hasText || staged;
+	const hasDraft = hasText || staged || contextReferences.length > 0;
 	const savingQueuedEdit = Boolean(editingQueuedTurnId);
 	const acceptedMutationWaiting = Boolean(
 		composerMutation.accepted &&
@@ -508,7 +514,8 @@ export const ChatComposer = memo(function ChatComposer({
 	);
 	// Cmd/Ctrl+Enter remains an intentionally quiet power-user path for steering
 	// the current draft into the running turn. The visible hint stays queue-only.
-	const canSteerDraft = Boolean(canSteer && onSteer) && !savingQueuedEdit;
+	const canSteerDraft =
+		Boolean(canSteer && onSteer) && !savingQueuedEdit && contextReferences.length === 0;
 	const canSteerNext =
 		Boolean(canSteer && onSteer) &&
 		!controlsDisabled &&
@@ -1018,7 +1025,7 @@ export const ChatComposer = memo(function ChatComposer({
 			attachment.stagedPath ? [attachment.stagedPath] : []);
 		const hasAttachments = settledAttachments.length > 0 || visibleRetainedAttachments.length > 0;
 		const canSubmitNow =
-			(body.length > 0 || hasAttachments || Boolean(recoveringDelivery)) &&
+			(body.length > 0 || hasAttachments || contextReferences.length > 0 || Boolean(recoveringDelivery)) &&
 			(!busy || savingQueuedEdit || recoveringDelivery?.state === "accepted") &&
 			!disabled && !steerPending && !savingQueuedEditPending &&
 			!composerMutation.pending &&
@@ -1147,6 +1154,7 @@ export const ChatComposer = memo(function ChatComposer({
 						}]
 					: [],
 			),
+			excerpts: recoveringDelivery?.excerpts ?? contextReferences,
 			requestText,
 			clientMessageId: recoveringDelivery?.clientMessageId ?? crypto.randomUUID(),
 		});
@@ -1201,11 +1209,19 @@ export const ChatComposer = memo(function ChatComposer({
 					return;
 				}
 			} else {
-				await onSend(
-					delivery.requestText,
-					sendNativeImages && nativePayloads.length > 0 ? nativePayloads : undefined,
-					delivery.clientMessageId,
-				);
+				const deliveryAttachments =
+					sendNativeImages && nativePayloads.length > 0 ? nativePayloads : undefined;
+				if (delivery.excerpts?.length) {
+					await onSend(
+						delivery.requestText,
+						deliveryAttachments,
+						delivery.clientMessageId,
+						undefined,
+						delivery.excerpts,
+					);
+				} else {
+					await onSend(delivery.requestText, deliveryAttachments, delivery.clientMessageId);
+				}
 			}
 			acceptAndClearDurableDelivery(delivery, mutationToken);
 			mutationFinished = true;
@@ -1495,6 +1511,38 @@ export const ChatComposer = memo(function ChatComposer({
 							</li>
 							);
 						})}
+					</ul>
+				) : null}
+				{contextReferences.length > 0 ? (
+					<ul className="flex flex-wrap gap-1.5" aria-label="Referenced messages">
+						{contextReferences.map((excerpt) => (
+							<li
+								key={excerpt.id}
+								className="flex max-w-full items-center gap-1.5 rounded border border-logo-accent/30 bg-logo-accent/8 px-2 py-1"
+							>
+								<MessageSquareQuote aria-hidden="true" className="size-3.5 shrink-0 text-logo-accent" />
+								<span className="max-w-[280px] truncate text-[11px] text-muted-foreground" title={excerpt.text}>
+									{excerpt.role === "assistant" ? "Agent" : "You"}: “{excerpt.text}”
+								</span>
+								<button
+									type="button"
+									disabled={controlsDisabled || draftMutationPending}
+									onClick={() => {
+										if (!draftScope || submitInFlight.current) return;
+										const result = writeChatExcerptReferences(
+											draftScope,
+											contextReferences.filter((item) => item.id !== excerpt.id),
+										);
+										composerRevision.current = result.draft.composer.revision;
+										setTextDraftPersistenceError(result.ok ? null : "chat.draft.saveFailed");
+									}}
+									aria-label="Remove referenced message"
+									className="shrink-0 text-muted-foreground hover:text-foreground disabled:opacity-50"
+								>
+									<X aria-hidden="true" className="size-3" />
+								</button>
+							</li>
+						))}
 					</ul>
 				) : null}
 

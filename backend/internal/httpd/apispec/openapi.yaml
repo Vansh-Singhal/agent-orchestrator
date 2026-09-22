@@ -4121,6 +4121,57 @@ paths:
       summary: Choose the model, reasoning effort and approval mode for the next turn
       tags:
       - conversations
+  /api/v1/sessions/{sessionId}/conversation/side-chats:
+    post:
+      operationId: createSessionConversationSideChat
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateConversationSideChatRequest'
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateConversationSideChatResponse'
+          description: Created
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Fork the active conversation into a read-only side chat
+      tags:
+      - conversations
   /api/v1/sessions/{sessionId}/conversation/skills:
     get:
       operationId: listSessionConversationSkills
@@ -9208,6 +9259,23 @@ components:
       - deletions
       - status
       type: object
+    ConversationExcerptReferenceRequest:
+      properties:
+        conversationId:
+          type: string
+        messageId:
+          type: string
+        revision:
+          format: int64
+          type: integer
+        text:
+          type: string
+      required:
+      - conversationId
+      - messageId
+      - revision
+      - text
+      type: object
     ConversationImageContentRequest:
       properties:
         data:
@@ -9396,6 +9464,29 @@ components:
       - uri
       - name
       type: object
+    ConversationSideChatResponse:
+      properties:
+        active:
+          type: boolean
+        createdAt:
+          type: string
+        forkAfterSequence:
+          format: int64
+          type: integer
+        id:
+          type: string
+        label:
+          type: string
+        parentBranchId:
+          type: string
+      required:
+      - id
+      - parentBranchId
+      - label
+      - forkAfterSequence
+      - active
+      - createdAt
+      type: object
     ConversationSkillResponse:
       properties:
         description:
@@ -9491,6 +9582,10 @@ components:
           type: string
         settings:
           $ref: '#/components/schemas/ConversationTurnSettingsPayload'
+        sideChats:
+          items:
+            $ref: '#/components/schemas/ConversationSideChatResponse'
+          type: array
         threadState:
           $ref: '#/components/schemas/ConversationThreadStatePayload'
         title:
@@ -9639,6 +9734,29 @@ components:
       - outputTokens
       - cachedTokens
       - totalTokens
+      type: object
+    CreateConversationSideChatRequest:
+      properties:
+        label:
+          maxLength: 80
+          type: string
+      type: object
+    CreateConversationSideChatResponse:
+      properties:
+        forkAfterSequence:
+          format: int64
+          type: integer
+        id:
+          type: string
+        label:
+          type: string
+        parentBranchId:
+          type: string
+      required:
+      - id
+      - parentBranchId
+      - label
+      - forkAfterSequence
       type: object
     DegradedProject:
       properties:
@@ -11482,6 +11600,10 @@ components:
           type: array
         clientMessageId:
           type: string
+        excerpts:
+          items:
+            $ref: '#/components/schemas/ConversationExcerptReferenceRequest'
+          type: array
         resources:
           items:
             $ref: '#/components/schemas/ConversationResourceContentRequest'

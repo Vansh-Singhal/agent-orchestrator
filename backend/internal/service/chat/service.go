@@ -26,6 +26,16 @@ var ErrNoController = errors.New("no live chat controller for session")
 // fact later, but callers must route from the persisted mode they read now.
 var ErrNotChatMode = errors.New("session is not in chat mode")
 
+var (
+	ErrExcerptInvalid = errors.New("chat excerpt is invalid")
+	ErrExcerptStale   = errors.New("chat excerpt is stale")
+)
+
+const (
+	maxExcerptReferences = 8
+	maxExcerptTextBytes  = 24 * 1024
+)
+
 // SessionReader is the session-fact surface the service needs. It reads the
 // persisted mode rather than trusting the caller, so a client cannot talk its way
 // into the wrong dispatch path.
@@ -482,6 +492,12 @@ func (s *Service) Start(ctx context.Context, cfg StartConfig) (*Controller, erro
 	if err != nil {
 		return nil, fmt.Errorf("load active conversation branch: %w", err)
 	}
+	if domain.NormalizeConversationBranchPurpose(activeBranch.Purpose) == domain.ConversationBranchPurposeSide {
+		cfg.Permissions = domain.PermissionModeReadOnly
+		cfg.SystemPrompt = branchSystemPrompt(activeBranch, cfg.SystemPrompt)
+		cfg.MCPServers = nil
+		conversation.Settings.ApprovalMode = domain.PermissionModeReadOnly
+	}
 	providerScopeID := activeBranch.ProviderScopeID
 	providerHandleOwnedByActiveBranch := true
 	if cfg.ProviderScopeID != "" {
@@ -517,7 +533,8 @@ func (s *Service) Start(ctx context.Context, cfg StartConfig) (*Controller, erro
 	if cfg.ProviderConversationID != "" {
 		cfg.Effort = conversation.Settings.ReasoningEffort
 	}
-	if cfg.ProviderConversationID != "" && conversation.Settings.ApprovalMode != "" {
+	if cfg.ProviderConversationID != "" && conversation.Settings.ApprovalMode != "" &&
+		domain.NormalizeConversationBranchPurpose(activeBranch.Purpose) != domain.ConversationBranchPurposeSide {
 		cfg.Permissions = conversation.Settings.ApprovalMode
 	}
 	if cfg.ProviderConversationID == "" {
@@ -950,7 +967,55 @@ func (s *Service) Send(
 	if err != nil {
 		return domain.ConversationTurn{}, err
 	}
+	// A crash-safe retry may arrive after its source message changed. Once this
+	// client id is already durable, the controller's existing idempotency path is
+	// authoritative and must not be blocked by re-validating old selection text.
+	if msg.ClientMessageID != "" {
+		if _, found, lookupErr := controller.store.ConversationMessageByClientID(
+			ctx, controller.conversation.ID, msg.ClientMessageID,
+		); lookupErr != nil {
+			return domain.ConversationTurn{}, fmt.Errorf("read message delivery: %w", lookupErr)
+		} else if found {
+			return controller.Send(ctx, msg)
+		}
+	}
+	if err := hydrateExcerptReferences(ctx, controller, &msg); err != nil {
+		return domain.ConversationTurn{}, err
+	}
 	return controller.Send(ctx, msg)
+}
+
+func hydrateExcerptReferences(ctx context.Context, controller *Controller, msg *ports.ChatUserMessage) error {
+	if len(msg.Excerpts) == 0 {
+		return nil
+	}
+	if len(msg.Excerpts) > maxExcerptReferences {
+		return fmt.Errorf("%w: at most %d excerpts may be attached", ErrExcerptInvalid, maxExcerptReferences)
+	}
+	total := 0
+	for _, excerpt := range msg.Excerpts {
+		text := strings.TrimSpace(excerpt.Text)
+		if excerpt.ConversationID != controller.conversation.ID || excerpt.MessageID == "" || text == "" || excerpt.Revision < 0 {
+			return fmt.Errorf("%w: source conversation, message, revision, and text are required", ErrExcerptInvalid)
+		}
+		total += len(text)
+		if total > maxExcerptTextBytes {
+			return fmt.Errorf("%w: attached excerpts exceed %d bytes", ErrExcerptInvalid, maxExcerptTextBytes)
+		}
+		source, found, err := controller.store.ConversationMessageByID(ctx, excerpt.ConversationID, excerpt.MessageID)
+		if err != nil {
+			return fmt.Errorf("read excerpt source: %w", err)
+		}
+		if !found || source.Revision != excerpt.Revision || source.Streaming || !strings.Contains(source.Text, text) {
+			return fmt.Errorf("%w: source message changed or no longer contains the selection", ErrExcerptStale)
+		}
+		msg.Content = append(msg.Content, ports.ChatContent{
+			Type: "resource", URI: ports.ChatExcerptResourceURIPrefix + source.ID,
+			Name: fmt.Sprintf("%s message", source.Role), MIMEType: "text/plain", Text: text,
+		})
+	}
+	msg.Excerpts = nil
+	return nil
 }
 
 // Resolve answers a pending approval.
@@ -1162,6 +1227,7 @@ type Snapshot struct {
 	Messages                         []domain.ConversationMessage
 	Activities                       []domain.ConversationActivity
 	BranchPoints                     []domain.ConversationBranchPoint
+	SideChats                        []domain.ConversationBranch
 	BranchedFromEarlierMessage       bool
 	OldestSequence                   int64
 	HasMoreBefore                    bool
@@ -1243,6 +1309,16 @@ func (s *Service) Snapshot(ctx context.Context, id domain.SessionID) (Snapshot, 
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("load conversation %s: %w", conversation.ID, err)
 	}
+	branches, err := s.store.ConversationBranches(ctx, conversation.ID)
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("list conversation branches %s: %w", conversation.ID, err)
+	}
+	sideChats := make([]domain.ConversationBranch, 0)
+	for _, branch := range branches {
+		if domain.NormalizeConversationBranchPurpose(branch.Purpose) == domain.ConversationBranchPurposeSide {
+			sideChats = append(sideChats, branch)
+		}
+	}
 
 	state := ports.ChatControllerStopped
 	var caps ports.ChatCapabilities
@@ -1264,6 +1340,7 @@ func (s *Service) Snapshot(ctx context.Context, id domain.SessionID) (Snapshot, 
 		Messages:                         rows.Messages,
 		Activities:                       rows.Activities,
 		BranchPoints:                     rows.BranchPoints,
+		SideChats:                        sideChats,
 		BranchedFromEarlierMessage:       rows.BranchedFromEarlierMessage,
 		Capabilities:                     caps,
 		Usage:                            rows.Conversation.Usage,
@@ -1299,6 +1376,16 @@ func (s *Service) SnapshotPage(ctx context.Context, id domain.SessionID, beforeS
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("load conversation page %s: %w", conversation.ID, err)
 	}
+	branches, err := s.store.ConversationBranches(ctx, conversation.ID)
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("list conversation branches %s: %w", conversation.ID, err)
+	}
+	sideChats := make([]domain.ConversationBranch, 0)
+	for _, branch := range branches {
+		if domain.NormalizeConversationBranchPurpose(branch.Purpose) == domain.ConversationBranchPurposeSide {
+			sideChats = append(sideChats, branch)
+		}
+	}
 	state := ports.ChatControllerStopped
 	var caps ports.ChatCapabilities
 	if controller, err := s.Controller(id); err == nil {
@@ -1318,6 +1405,7 @@ func (s *Service) SnapshotPage(ctx context.Context, id domain.SessionID, beforeS
 		Messages:                         rows.Messages,
 		Activities:                       rows.Activities,
 		BranchPoints:                     rows.BranchPoints,
+		SideChats:                        sideChats,
 		BranchedFromEarlierMessage:       rows.BranchedFromEarlierMessage,
 		OldestSequence:                   rows.OldestSequence,
 		HasMoreBefore:                    rows.HasMoreBefore,
@@ -1539,6 +1627,13 @@ func (s *Service) SetConfigOption(
 	if err != nil {
 		return nil, err
 	}
+	activeBranch, err := s.store.ConversationBranch(ctx, controller.conversation.ID, controller.conversation.ActiveBranchID)
+	if err != nil {
+		return nil, err
+	}
+	if domain.NormalizeConversationBranchPurpose(activeBranch.Purpose) == domain.ConversationBranchPurposeSide {
+		return nil, ErrSideChatUnsupported
+	}
 	configurer, ok := controller.conv.(ports.ChatConfigOptionController)
 	if !ok {
 		return nil, ErrConfigOptionsUnsupported
@@ -1702,6 +1797,13 @@ func (s *Service) SetTurnSettings(
 	controller, err := s.Controller(id)
 	if err != nil {
 		return domain.ConversationSettings{}, err
+	}
+	activeBranch, err := s.store.ConversationBranch(ctx, controller.conversation.ID, controller.conversation.ActiveBranchID)
+	if err != nil {
+		return domain.ConversationSettings{}, err
+	}
+	if domain.NormalizeConversationBranchPurpose(activeBranch.Purpose) == domain.ConversationBranchPurposeSide {
+		return domain.ConversationSettings{}, ErrSideChatUnsupported
 	}
 	controller.configMu.Lock()
 	defer controller.configMu.Unlock()

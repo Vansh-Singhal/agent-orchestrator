@@ -320,6 +320,8 @@ func insertConversationBranchTx(
 		ReplayTruncated:        boolInt(branch.ReplayTruncated),
 		ProviderScopeID:        branch.ProviderScopeID,
 		ProviderIdsScoped:      boolInt(branch.ProviderIDsScoped),
+		Purpose:                string(domain.NormalizeConversationBranchPurpose(branch.Purpose)),
+		Label:                  branch.Label,
 		CreatedAt:              now,
 	}); err != nil {
 		return fmt.Errorf("insert conversation branch %s: %w", branch.ID, err)
@@ -957,6 +959,25 @@ func (s *Store) ConversationMessageByClientID(
 	row, err := s.qr.SelectConversationMessageByClientID(ctx,
 		gen.SelectConversationMessageByClientIDParams{
 			ConversationID: conversationID, ClientMessageID: clientMessageID,
+		})
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.ConversationMessage{}, false, nil
+	}
+	if err != nil {
+		return domain.ConversationMessage{}, false, err
+	}
+	return messageToDomain(row), true, nil
+}
+
+// ConversationMessageByID reads one durable source message for excerpt
+// validation without loading the entire conversation history.
+func (s *Store) ConversationMessageByID(
+	ctx context.Context,
+	conversationID, messageID string,
+) (domain.ConversationMessage, bool, error) {
+	row, err := s.qr.SelectConversationMessageByID(ctx,
+		gen.SelectConversationMessageByIDParams{
+			ConversationID: conversationID, ID: messageID,
 		})
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.ConversationMessage{}, false, nil
@@ -3080,6 +3101,8 @@ func conversationBranchToDomain(row gen.SelectConversationBranchRow) domain.Conv
 		Strategy:               domain.NormalizeConversationBranchStrategy(domain.ConversationBranchStrategy(row.Strategy)),
 		ReplayCutoffSequence:   row.ReplayCutoffSequence,
 		ReplayTruncated:        row.ReplayTruncated != 0,
+		Purpose:                domain.NormalizeConversationBranchPurpose(domain.ConversationBranchPurpose(row.Purpose)),
+		Label:                  row.Label,
 		ProviderBindingID:      row.ProviderBindingID,
 		ProviderScopeID:        row.EffectiveProviderScopeID,
 		ProviderIDsScoped:      row.ProviderIdsScoped != 0,
@@ -3102,6 +3125,8 @@ func conversationBranchListToDomain(row gen.SelectConversationBranchesRow) domai
 		Strategy:               domain.NormalizeConversationBranchStrategy(domain.ConversationBranchStrategy(row.Strategy)),
 		ReplayCutoffSequence:   row.ReplayCutoffSequence,
 		ReplayTruncated:        row.ReplayTruncated != 0,
+		Purpose:                domain.NormalizeConversationBranchPurpose(domain.ConversationBranchPurpose(row.Purpose)),
+		Label:                  row.Label,
 		ProviderBindingID:      row.ProviderBindingID,
 		ProviderScopeID:        row.EffectiveProviderScopeID,
 		ProviderIDsScoped:      row.ProviderIdsScoped != 0,

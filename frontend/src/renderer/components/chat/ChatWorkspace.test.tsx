@@ -339,6 +339,101 @@ describe("Chat message timestamps", () => {
 });
 
 describe("ChatWorkspace timeline", () => {
+	it("adds selected transcript text to the durable composer as a removable reference", async () => {
+		const snapshot = idleSnapshot(chatFixture);
+		render(<ChatWorkspace snapshot={snapshot} onSend={vi.fn()} />);
+		const message = screen.getByText(
+			"Check the worktree state and tell me what changed since the base commit.",
+		);
+		const textNode = message.firstChild;
+		if (!textNode) throw new Error("message text node is missing");
+		const removeAllRanges = vi.fn();
+		const selection = {
+			anchorNode: textNode,
+			focusNode: textNode,
+			isCollapsed: false,
+			rangeCount: 1,
+			toString: () => "worktree state",
+			getRangeAt: () => ({
+				getBoundingClientRect: () => ({ left: 100, top: 100, width: 80, height: 18 }),
+			}),
+			removeAllRanges,
+		} as unknown as Selection;
+		const getSelection = vi.spyOn(window, "getSelection").mockReturnValue(selection);
+		try {
+			fireEvent.mouseUp(screen.getByRole("log", { name: "Conversation" }));
+			await userEvent.click(screen.getByRole("button", { name: "Add to chat" }));
+			expect(screen.getByLabelText("Referenced messages")).toHaveTextContent(
+				"You: “worktree state”",
+			);
+			expect(readChatSessionDraft(snapshot.sessionId).composer.excerpts).toEqual([
+				expect.objectContaining({
+					conversationId: snapshot.conversationId,
+					messageId: "m-1",
+					revision: 0,
+					text: "worktree state",
+					role: "user",
+				}),
+			]);
+			expect(removeAllRanges).toHaveBeenCalled();
+			await userEvent.click(screen.getByRole("button", { name: "Remove referenced message" }));
+			expect(screen.queryByLabelText("Referenced messages")).not.toBeInTheDocument();
+		} finally {
+			getSelection.mockRestore();
+		}
+	});
+
+	it("offers selected transcript text to a new read-only side chat", async () => {
+		const snapshot = { ...idleSnapshot(chatFixture), capabilities: ["read_only"] };
+		const onCreateSideChat = vi.fn().mockResolvedValue({ id: "side-1" });
+		render(<ChatWorkspace snapshot={snapshot} onCreateSideChat={onCreateSideChat} />);
+		const message = screen.getByText(
+			"Check the worktree state and tell me what changed since the base commit.",
+		);
+		const textNode = message.firstChild;
+		if (!textNode) throw new Error("message text node is missing");
+		const selection = {
+			anchorNode: textNode,
+			focusNode: textNode,
+			isCollapsed: false,
+			rangeCount: 1,
+			toString: () => "what changed",
+			getRangeAt: () => ({ getBoundingClientRect: () => ({ left: 100, top: 100, width: 80, height: 18 }) }),
+			removeAllRanges: vi.fn(),
+		} as unknown as Selection;
+		const getSelection = vi.spyOn(window, "getSelection").mockReturnValue(selection);
+		try {
+			fireEvent.mouseUp(screen.getByRole("log", { name: "Conversation" }));
+			await userEvent.click(screen.getByRole("button", { name: "Add to side chat" }));
+			expect(onCreateSideChat).toHaveBeenCalledWith("what changed");
+			expect(readChatSessionDraft(snapshot.sessionId).composer.excerpts).toEqual([
+				expect.objectContaining({ text: "what changed", messageId: "m-1" }),
+			]);
+		} finally {
+			getSelection.mockRestore();
+		}
+	});
+
+	it("navigates durable /btw chats and labels the active one read-only", async () => {
+		const onActivateBranch = vi.fn().mockResolvedValue(undefined);
+		const snapshot: ConversationSnapshot = {
+			...idleSnapshot(chatFixture),
+			activeBranchId: "side-1",
+			sideChats: [{
+				id: "side-1",
+				parentBranchId: "main-1",
+				label: "Question",
+				forkAfterSequence: 1,
+				active: true,
+				createdAt: "2026-09-22T00:00:00Z",
+			}],
+		};
+		render(<ChatWorkspace snapshot={snapshot} onActivateBranch={onActivateBranch} />);
+		expect(screen.getByText("Read-only")).toBeInTheDocument();
+		await userEvent.click(screen.getByRole("button", { name: "Main chat" }));
+		expect(onActivateBranch).toHaveBeenCalledWith("main-1");
+	});
+
 	it("shows a local human echo until the matching durable turn arrives", () => {
 		const snapshot = idleSnapshot(chatFixtureEmpty);
 		const localEchos = [

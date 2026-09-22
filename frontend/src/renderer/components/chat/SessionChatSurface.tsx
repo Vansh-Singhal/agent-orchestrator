@@ -177,6 +177,7 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 	// its data. Treat that snapshot as unknown everywhere, especially at the work
 	// boundary that decides whether switching to Terminal needs user consent.
 	const snapshot = queriedSnapshot?.sessionId === session.id ? queriedSnapshot : undefined;
+	const sideChatActive = Boolean(snapshot?.sideChats?.some((sideChat) => sideChat.active));
 	const commands = useConversationCommands(session.id);
 	const projectPermissions = useRememberProjectPermissions(session.workspaceId, snapshot?.harness);
 	const {
@@ -506,8 +507,25 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 				loadingOlder={isLoadingOlder}
 				onLoadOlder={loadOlder}
 				busy={commands.busy}
-				onSend={(text, attachments, clientMessageId) =>
-					commands.send({ text, attachments, clientMessageId })}
+				onSend={async (text, attachments, clientMessageId, excerpts) => {
+					const btw = /^\/btw(?:\s+|$)/i.exec(text);
+					const message = btw ? text.slice(btw[0].length).trim() : text;
+					if (btw) {
+						if (!message) throw new Error("Type a question after /btw.");
+						await commands.createSideChat(message.slice(0, 80));
+					}
+					return commands.send({
+						text: message,
+						attachments,
+						clientMessageId,
+						excerpts: excerpts?.map((excerpt) => ({
+							conversationId: excerpt.conversationId,
+							messageId: excerpt.messageId,
+							revision: excerpt.revision,
+							text: excerpt.text,
+						})),
+					});
+				}}
 				commandError={commands.error}
 				onDecide={commands.resolve}
 				onResolveInput={commands.resolveInput}
@@ -520,32 +538,35 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 				onOpenShell={onOpenShell}
 				openingShell={openingShell}
 				shellError={shellError}
-				models={models}
-				onChooseSettings={hasProviderMode ? undefined : commands.chooseSettings}
+				models={sideChatActive ? [] : models}
+				onChooseSettings={sideChatActive || hasProviderMode ? undefined : commands.chooseSettings}
 				onRememberPermissions={can(renderSnapshot, "config_options") && !configOptions.loaded
 					? undefined : projectPermissions.remember}
 				rememberPermissionsPending={projectPermissions.pending}
 				rememberPermissionsError={projectPermissions.error}
 				rememberedPermissionMode={projectPermissions.savedMode}
-				configOptions={configOptions.options}
-				onChooseConfigOption={configOptions.setOption}
+				configOptions={sideChatActive ? [] : configOptions.options}
+				onChooseConfigOption={sideChatActive ? undefined : configOptions.setOption}
 				configOptionPending={configOptions.pending || commands.choosingSettings}
 				configOptionError={configOptions.error}
-				onCompact={commands.compact}
+				onCompact={sideChatActive ? undefined : commands.compact}
 				compacting={commands.compacting}
 				compactUnavailable={commands.compactUnavailable}
-				onRollback={commands.rollback}
+				onRollback={sideChatActive ? undefined : commands.rollback}
 				rollbackPending={commands.rollbackPending}
 				rollbackError={commands.rollbackError}
 				onOpenFiles={onOpenFiles}
 				onOpenFile={onOpenFile}
 				retryControl={commands.retryControl}
-				onEditMessage={commands.editMessage}
+				onEditMessage={sideChatActive ? undefined : commands.editMessage}
 				editMessagePending={commands.editMessagePending}
 				editMessageError={commands.editMessageError}
 				onActivateBranch={commands.activateBranch}
 				activateBranchPending={commands.activateBranchPending}
 				activateBranchError={commands.activateBranchError}
+				onCreateSideChat={commands.createSideChat}
+				createSideChatPending={commands.createSideChatPending}
+				createSideChatError={commands.createSideChatError}
 				skills={skills}
 				filePaths={paths}
 				filePathsTruncated={truncated}

@@ -245,6 +245,8 @@ type ConversationBranch struct {
 	ReplayTruncated        int64
 	ProviderScopeID        string
 	ProviderIdsScoped      int64
+	Purpose                string
+	Label                  string
 }
 
 type ConversationEditDelivery struct {

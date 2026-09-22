@@ -1580,6 +1580,23 @@ export interface paths {
         patch: operations["setSessionConversationTurnSettings"];
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/conversation/side-chats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Fork the active conversation into a read-only side chat */
+        post: operations["createSessionConversationSideChat"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/conversation/skills": {
         parameters: {
             query?: never;
@@ -3202,6 +3219,13 @@ export interface components {
             /** @enum {string} */
             status: "added" | "modified" | "deleted" | "renamed";
         };
+        ConversationExcerptReferenceRequest: {
+            conversationId: string;
+            messageId: string;
+            /** Format: int64 */
+            revision: number;
+            text: string;
+        };
         ConversationImageContentRequest: {
             data: string;
             mimeType: string;
@@ -3277,6 +3301,15 @@ export interface components {
             text?: null | string;
             uri: string;
         };
+        ConversationSideChatResponse: {
+            active: boolean;
+            createdAt: string;
+            /** Format: int64 */
+            forkAfterSequence: number;
+            id: string;
+            label: string;
+            parentBranchId: string;
+        };
         ConversationSkillResponse: {
             description?: string;
             displayName: string;
@@ -3315,6 +3348,7 @@ export interface components {
             rateLimits?: components["schemas"]["ConversationRateLimitsPayload"];
             sessionId: string;
             settings: components["schemas"]["ConversationTurnSettingsPayload"];
+            sideChats?: components["schemas"]["ConversationSideChatResponse"][];
             threadState?: components["schemas"]["ConversationThreadStatePayload"];
             title?: string;
             turns: components["schemas"]["ConversationTurnResponse"][];
@@ -3367,6 +3401,16 @@ export interface components {
             outputTokens: number;
             /** Format: int64 */
             totalTokens: number;
+        };
+        CreateConversationSideChatRequest: {
+            label?: string;
+        };
+        CreateConversationSideChatResponse: {
+            /** Format: int64 */
+            forkAfterSequence: number;
+            id: string;
+            label: string;
+            parentBranchId: string;
         };
         DegradedProject: {
             id: string;
@@ -4060,6 +4104,7 @@ export interface components {
         SendConversationMessageRequest: {
             attachments?: components["schemas"]["ConversationImageContentRequest"][];
             clientMessageId?: string;
+            excerpts?: components["schemas"]["ConversationExcerptReferenceRequest"][];
             resources?: components["schemas"]["ConversationResourceContentRequest"][];
             text: string;
         };
@@ -10037,6 +10082,69 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    createSessionConversationSideChat: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateConversationSideChatRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateConversationSideChatResponse"];
                 };
             };
             /** @description Not Found */

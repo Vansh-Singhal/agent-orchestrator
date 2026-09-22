@@ -208,6 +208,22 @@ type ConversationRecord struct {
 // fresh provider session with bounded AO-owned textual context.
 type ConversationBranchStrategy string
 
+// ConversationBranchPurpose distinguishes ordinary history branches from a
+// question-only side conversation. Empty is the legacy/main value.
+type ConversationBranchPurpose string
+
+const (
+	ConversationBranchPurposeMain ConversationBranchPurpose = "main"
+	ConversationBranchPurposeSide ConversationBranchPurpose = "side"
+)
+
+func NormalizeConversationBranchPurpose(purpose ConversationBranchPurpose) ConversationBranchPurpose {
+	if purpose == "" {
+		return ConversationBranchPurposeMain
+	}
+	return purpose
+}
+
 const (
 	// ConversationBranchStrategyNative preserves the provider's exact history.
 	ConversationBranchStrategyNative ConversationBranchStrategy = "native"
@@ -242,6 +258,8 @@ type ConversationBranch struct {
 	Strategy             ConversationBranchStrategy `json:"strategy,omitempty"`
 	ReplayCutoffSequence int64                      `json:"-"`
 	ReplayTruncated      bool                       `json:"replayTruncated,omitempty"`
+	Purpose              ConversationBranchPurpose  `json:"purpose,omitempty"`
+	Label                string                     `json:"label,omitempty"`
 	// ProviderBindingID identifies the durable adapter/configuration epoch that
 	// can reopen this branch. It is deliberately separate from ProviderScopeID:
 	// approximate siblings own different opaque-id namespaces while remaining

@@ -144,6 +144,7 @@ func capabilities() ports.ChatCapabilities {
 		// feature off while the call still works would take undo away for no reason.
 		ports.ChatCapabilityRollback: true,
 		ports.ChatCapabilityFork:     true,
+		ports.ChatCapabilityReadOnly: true,
 		ports.ChatCapabilityRename:   true,
 		ports.ChatCapabilitySkills:   true,
 		// config/mcpServer/reload plus the status inventory read after it, both
@@ -538,6 +539,8 @@ func initializeConnection(ctx context.Context, connection *conn) error {
 // become stricter than the terminal path for the same setting.
 func approvalSettings(mode ports.PermissionMode) (policy, sandbox string) {
 	switch ports.NormalizePermissionMode(mode) {
+	case ports.PermissionModeReadOnly:
+		return "never", "read-only"
 	case ports.PermissionModeAcceptEdits, ports.PermissionModeAuto:
 		// on-request lets the provider decide when to ask; workspace-write keeps
 		// edits inside the worktree.

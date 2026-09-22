@@ -56,6 +56,10 @@ type pagedConversationService interface {
 	SnapshotPage(ctx context.Context, session domain.SessionID, beforeSequence, limit int64) (chatsvc.Snapshot, error)
 }
 
+type sideChatConversationService interface {
+	CreateSideChat(ctx context.Context, session domain.SessionID, label string) (domain.ConversationBranch, error)
+}
+
 // ConversationsController owns the Chat routes for a session.
 //
 // Every route dispatches from the session's persisted mode inside the service, so
@@ -88,8 +92,44 @@ func (c *ConversationsController) Register(r chi.Router) {
 	r.Post("/sessions/{sessionId}/conversation/turns/{turnId}/edit", c.editMessage)
 	r.Post("/sessions/{sessionId}/conversation/turns/{turnId}/retry", c.retryTurn)
 	r.Post("/sessions/{sessionId}/conversation/branches/{branchId}/activate", c.activateBranch)
+	r.Post("/sessions/{sessionId}/conversation/side-chats", c.createSideChat)
 	r.Put("/sessions/{sessionId}/conversation/title", c.setTitle)
 	r.Post("/sessions/{sessionId}/conversation/mcp/reload", c.reloadMCPServers)
+}
+
+func (c *ConversationsController) createSideChat(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/conversation/side-chats")
+		return
+	}
+	var req CreateConversationSideChatRequest
+	if !decodeConversationBody(w, r, &req) {
+		return
+	}
+	svc, ok := c.Svc.(sideChatConversationService)
+	if !ok {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/conversation/side-chats")
+		return
+	}
+	branch, err := svc.CreateSideChat(r.Context(), domain.SessionID(chi.URLParam(r, "sessionId")), req.Label)
+	if errors.Is(err, chatsvc.ErrSideChatUnsupported) || errors.Is(err, chatsvc.ErrForkUnsupported) {
+		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "CHAT_SIDE_UNSUPPORTED",
+			"this agent cannot open a read-only side chat", nil)
+		return
+	}
+	if errors.Is(err, chatsvc.ErrTurnRunning) || errors.Is(err, chatsvc.ErrControllerHandoff) {
+		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "CHAT_SIDE_BUSY",
+			"finish or stop the current turn before opening a side chat", nil)
+		return
+	}
+	if err != nil {
+		writeConversationError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusCreated, CreateConversationSideChatResponse{
+		ID: branch.ID, ParentBranchID: branch.ParentBranchID, Label: branch.Label,
+		ForkAfterSequence: branch.ForkAfterSequence,
+	})
 }
 
 func (c *ConversationsController) editMessage(w http.ResponseWriter, r *http.Request) {
@@ -561,7 +601,7 @@ func (c *ConversationsController) send(w http.ResponseWriter, r *http.Request) {
 	if !decodeConversationBody(w, r, &req) {
 		return
 	}
-	if req.Text == "" && len(req.Attachments) == 0 && len(req.Resources) == 0 {
+	if req.Text == "" && len(req.Attachments) == 0 && len(req.Resources) == 0 && len(req.Excerpts) == 0 {
 		// There is no keystroke concept in Chat mode: an empty body is a client
 		// bug, not a way to nudge the agent.
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "validation",
@@ -577,11 +617,23 @@ func (c *ConversationsController) send(w http.ResponseWriter, r *http.Request) {
 	}
 	text := req.Text
 	if text == "" {
-		text = fmt.Sprintf("Attached %d item(s) for context", len(content))
+		if len(req.Excerpts) > 0 {
+			text = fmt.Sprintf("Use the attached %d chat excerpt(s) as context", len(req.Excerpts))
+		} else {
+			text = fmt.Sprintf("Attached %d item(s) for context", len(content))
+		}
+	}
+	excerpts := make([]ports.ChatExcerptReference, 0, len(req.Excerpts))
+	for _, excerpt := range req.Excerpts {
+		excerpts = append(excerpts, ports.ChatExcerptReference{
+			ConversationID: excerpt.ConversationID, MessageID: excerpt.MessageID,
+			Revision: excerpt.Revision, Text: excerpt.Text,
+		})
 	}
 	turn, err := c.Svc.Send(r.Context(), domain.SessionID(chi.URLParam(r, "sessionId")), ports.ChatUserMessage{
 		Text:            text,
 		Content:         content,
+		Excerpts:        excerpts,
 		ClientMessageID: req.ClientMessageID,
 		Origin:          domain.MessageOriginHuman,
 	})
@@ -765,6 +817,14 @@ func writeConversationError(w http.ResponseWriter, r *http.Request, err error) {
 			"CHAT_CONTROLLER_NOT_READY",
 			"the agent controller for this session is not running", nil)
 
+	case errors.Is(err, chatsvc.ErrExcerptInvalid):
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "validation",
+			"CHAT_EXCERPT_INVALID", err.Error(), nil)
+
+	case errors.Is(err, chatsvc.ErrExcerptStale):
+		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict",
+			"CHAT_EXCERPT_STALE", err.Error(), nil)
+
 	case errors.Is(err, chatsvc.ErrControllerHandoff):
 		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict",
 			"CHAT_INTERFACE_TRANSITION",
@@ -904,6 +964,7 @@ func conversationSnapshotResponse(s chatsvc.Snapshot) ConversationSnapshotRespon
 		Messages:                         make([]ConversationMessageResponse, 0, len(s.Messages)),
 		Activities:                       make([]ConversationActivityResponse, 0, len(s.Activities)),
 		BranchPoints:                     make([]ConversationBranchPointResponse, 0, len(s.BranchPoints)),
+		SideChats:                        make([]ConversationSideChatResponse, 0, len(s.SideChats)),
 		BranchMaterialization:            branchMaterializationPayload(s.ActiveBranch),
 		Settings:                         turnSettingsPayload(s.Conversation.Settings),
 		Usage:                            usagePayload(s.Usage),
@@ -915,6 +976,13 @@ func conversationSnapshotResponse(s chatsvc.Snapshot) ConversationSnapshotRespon
 		ThreadState:                      threadStatePayload(s.Conversation.ThreadState),
 		MCPServers:                       mcpServersPayload(s.Conversation.MCPServers),
 		Capabilities:                     capabilityNames(s.Capabilities),
+	}
+	for _, branch := range s.SideChats {
+		out.SideChats = append(out.SideChats, ConversationSideChatResponse{
+			ID: branch.ID, ParentBranchID: branch.ParentBranchID, Label: branch.Label,
+			ForkAfterSequence: branch.ForkAfterSequence, Active: branch.Active,
+			CreatedAt: branch.CreatedAt.UTC().Format(time.RFC3339),
+		})
 	}
 
 	for _, turn := range s.Turns {

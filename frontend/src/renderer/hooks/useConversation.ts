@@ -56,11 +56,13 @@ type WireMessage = components["schemas"]["ConversationMessageResponse"];
 type WireActivity = components["schemas"]["ConversationActivityResponse"];
 type WireImageContent = components["schemas"]["ConversationImageContentRequest"];
 type WireResourceContent = components["schemas"]["ConversationResourceContentRequest"];
+type WireExcerptReference = components["schemas"]["ConversationExcerptReferenceRequest"];
 
 export interface ConversationSendInput {
 	text: string;
 	attachments?: WireImageContent[];
 	resources?: WireResourceContent[];
+	excerpts?: WireExcerptReference[];
 	/** Caller-owned durable idempotency key used for crash-safe retries. */
 	clientMessageId?: string;
 }
@@ -884,6 +886,21 @@ export function useConversationCommands(sessionId: string | undefined) {
 		},
 		onSettled: invalidate,
 	});
+	const createSideChat = useMutation({
+		mutationFn: async (label?: string) => {
+			if (!sessionId) throw new Error("No conversation session is selected.");
+			const { data, error } = await apiClient.POST(
+				"/api/v1/sessions/{sessionId}/conversation/side-chats",
+				{
+					params: { path: { sessionId } },
+					body: { label },
+				},
+			);
+			if (error) throw error;
+			return data;
+		},
+		onSettled: invalidate,
+	});
 	const acknowledgeAcceptedTurn = useCallback(
 		(turnId: string) => {
 			if (!sessionId) return;
@@ -1021,6 +1038,9 @@ export function useConversationCommands(sessionId: string | undefined) {
 		activateBranch: (branchId: string) => activateBranch.mutateAsync(branchId),
 		activateBranchPending: activateBranch.isPending,
 		activateBranchError: activateBranch.error ? apiErrorMessage(activateBranch.error) : undefined,
+		createSideChat: (label?: string) => createSideChat.mutateAsync(label),
+		createSideChatPending: createSideChat.isPending,
+		createSideChatError: createSideChat.error ? apiErrorMessage(createSideChat.error) : undefined,
 		steer: async (text: string, attachments?: WireImageContent[], clientMessageId?: string, recoverOnly?: boolean): Promise<ChatSteerOutcome> => {
 			try {
 				await steer.mutateAsync({ text, attachments, clientMessageId, recoverOnly });
@@ -1072,7 +1092,8 @@ export function useConversationCommands(sessionId: string | undefined) {
 			(send.isPending && sendTargetsCurrentSession) ||
 			resolve.isPending ||
 			resolveInput.isPending ||
-			(interrupt.isPending && interruptTargetsCurrentSession),
+			(interrupt.isPending && interruptTargetsCurrentSession) ||
+			createSideChat.isPending,
 		error:
 			(sendTargetsCurrentSession && send.error) ||
 			resolve.error ||
@@ -1484,6 +1505,14 @@ function toSnapshot(wire: WireSnapshot): ConversationSnapshot {
 			total: point.total,
 			previousBranchId: point.previousBranchId || undefined,
 			nextBranchId: point.nextBranchId || undefined,
+		})),
+		sideChats: (wire.sideChats ?? []).map((sideChat) => ({
+			id: sideChat.id,
+			parentBranchId: sideChat.parentBranchId,
+			label: sideChat.label,
+			forkAfterSequence: sideChat.forkAfterSequence,
+			active: sideChat.active,
+			createdAt: sideChat.createdAt,
 		})),
 		turns: (wire.turns ?? []).map((turn) => ({
 			id: turn.id,

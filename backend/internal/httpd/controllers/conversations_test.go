@@ -48,6 +48,10 @@ type fakeConversationService struct {
 	approvalDecision  ports.ChatDecision
 	inputRequestID    string
 	inputResponse     ports.ChatInputResponse
+	sideChatSession   domain.SessionID
+	sideChatLabel     string
+	sideChatBranch    domain.ConversationBranch
+	sideChatErr       error
 }
 
 func (f *fakeConversationService) EditMessage(context.Context, domain.SessionID, string, ports.ChatUserMessage) (chatsvc.EditMessageResult, error) {
@@ -56,6 +60,12 @@ func (f *fakeConversationService) EditMessage(context.Context, domain.SessionID,
 
 func (f *fakeConversationService) ActivateBranch(context.Context, domain.SessionID, string) (string, error) {
 	return "", nil
+}
+
+func (f *fakeConversationService) CreateSideChat(_ context.Context, session domain.SessionID, label string) (domain.ConversationBranch, error) {
+	f.sideChatSession = session
+	f.sideChatLabel = label
+	return f.sideChatBranch, f.sideChatErr
 }
 
 func (f *fakeConversationService) Snapshot(context.Context, domain.SessionID) (chatsvc.Snapshot, error) {
@@ -303,6 +313,75 @@ func TestSendConversationPreservesNativeImageAndResourceContent(t *testing.T) {
 	}
 	if service.sent.Content[0].Type != "image" || service.sent.Content[1].Type != "resource_link" || service.sent.Content[2].Type != "resource" {
 		t.Fatalf("content = %#v", service.sent.Content)
+	}
+}
+
+func TestSendConversationCarriesExcerptReferencesWithoutTrustingClientResources(t *testing.T) {
+	service := &fakeConversationService{}
+	server := conversationTestServer(t, service)
+	body := []byte(`{
+		"text":"use this context",
+		"excerpts":[{
+			"conversationId":"conversation-1",
+			"messageId":"message-7",
+			"revision":3,
+			"text":"the selected sentence"
+		}]
+	}`)
+	request, err := http.NewRequest(http.MethodPost,
+		server.URL+"/api/v1/sessions/p1-1/conversation/messages", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("POST message: %v", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusAccepted {
+		got, _ := io.ReadAll(response.Body)
+		t.Fatalf("status = %d, body = %s", response.StatusCode, got)
+	}
+	if len(service.sent.Excerpts) != 1 || service.sent.Excerpts[0] != (ports.ChatExcerptReference{
+		ConversationID: "conversation-1", MessageID: "message-7", Revision: 3,
+		Text: "the selected sentence",
+	}) {
+		t.Fatalf("excerpts = %#v", service.sent.Excerpts)
+	}
+	if len(service.sent.Content) != 0 {
+		t.Fatalf("unverified excerpt became client content: %#v", service.sent.Content)
+	}
+}
+
+func TestCreateConversationSideChatReturnsDurableBranch(t *testing.T) {
+	service := &fakeConversationService{sideChatBranch: domain.ConversationBranch{
+		ID: "side-1", ParentBranchID: "main-1", Label: "Explain this",
+		ForkAfterSequence: 12,
+	}}
+	server := conversationTestServer(t, service)
+	response, err := http.Post(
+		server.URL+"/api/v1/sessions/p1-1/conversation/side-chats",
+		"application/json",
+		bytes.NewBufferString(`{"label":"Explain this"}`),
+	)
+	if err != nil {
+		t.Fatalf("POST side chat: %v", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("status = %d, body = %s", response.StatusCode, body)
+	}
+	var got map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if service.sideChatSession != "p1-1" || service.sideChatLabel != "Explain this" {
+		t.Fatalf("create side chat input = %q/%q", service.sideChatSession, service.sideChatLabel)
+	}
+	if got["id"] != "side-1" || got["parentBranchId"] != "main-1" || got["forkAfterSequence"] != float64(12) {
+		t.Fatalf("response = %#v", got)
 	}
 }
 
