@@ -2180,20 +2180,34 @@ function Timeline({
 			? selection.focusNode
 			: selection.focusNode?.parentElement;
 		const source = anchor?.closest<HTMLElement>("[data-chat-message-id]");
+		const content = anchor?.closest<HTMLElement>("[data-chat-message-content]");
 		if (
 			!source ||
+			!content ||
+			content !== focus?.closest<HTMLElement>("[data-chat-message-content]") ||
+			!source.contains(content) ||
 			source !== focus?.closest<HTMLElement>("[data-chat-message-id]") ||
 			!scrollContent.current?.contains(source)
 		) {
 			setSelectionAction(null);
 			return;
 		}
-		const text = selection.toString().trim();
+		const range = selection.getRangeAt(0);
+		if (
+			anchor?.closest("[data-chat-selection-exclude]") ||
+			focus?.closest("[data-chat-selection-exclude]") ||
+			Array.from(content.querySelectorAll("[data-chat-selection-exclude]"))
+				.some((node) => range.intersectsNode(node))
+		) {
+			setSelectionAction(null);
+			return;
+		}
+		const text = selection.toString();
 		const messageId = source.dataset.chatMessageId;
 		const revision = Number(source.dataset.chatMessageRevision);
 		const role = source.dataset.chatMessageRole;
 		if (
-			!text ||
+			!text.trim() ||
 			!messageId ||
 			!Number.isSafeInteger(revision) ||
 			(role !== "user" && role !== "assistant")
@@ -2201,7 +2215,7 @@ function Timeline({
 			setSelectionAction(null);
 			return;
 		}
-		const rect = selection.getRangeAt(0).getBoundingClientRect();
+		const rect = range.getBoundingClientRect();
 		const timelineRect = scroller.current?.getBoundingClientRect();
 		if (!timelineRect) return;
 		setSelectionAction({

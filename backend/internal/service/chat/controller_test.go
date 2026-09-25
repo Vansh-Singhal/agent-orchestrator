@@ -3273,6 +3273,53 @@ func TestSendVerifiesExcerptAndFallsBackToTextForProvider(t *testing.T) {
 	}
 }
 
+func TestSendAcceptsRenderedMarkdownSelectionWithFullTurn(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	seed, err := h.svc.Send(ctx, testSession, ports.ChatUserMessage{
+		Text: "Why is this important?", Origin: domain.MessageOriginHuman,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.conv.emit(
+		ports.ChatEvent{Kind: ports.ChatEventTurnStarted, ProviderTurnID: seed.ProviderTurnID},
+		ports.ChatEvent{Kind: ports.ChatEventMessageCompleted, ProviderTurnID: seed.ProviderTurnID,
+			ProviderItemID: "formatted-answer", Text: "It's **very important** to say &quot;hello&quot;."},
+		ports.ChatEvent{Kind: ports.ChatEventTurnCompleted, ProviderTurnID: seed.ProviderTurnID,
+			TurnState: domain.TurnStateCompleted},
+	)
+	snapshot := h.awaitSnapshot(t, func(s store.ConversationSnapshot) bool {
+		return len(s.Messages) == 2 && s.Turns[0].State == domain.TurnStateCompleted
+	})
+	source := snapshot.Messages[1]
+	reference := ports.ChatExcerptReference{
+		ConversationID: h.ctrl.ConversationID(), MessageID: source.ID,
+		Revision: source.Revision, Text: `very important to say "hello"`,
+	}
+	_, err = h.svc.Send(ctx, testSession, ports.ChatUserMessage{
+		Text: "Explain more", Origin: domain.MessageOriginHuman,
+		Excerpts: []ports.ChatExcerptReference{reference},
+	})
+	if err != nil {
+		t.Fatalf("send rendered selection: %v", err)
+	}
+	sent := h.conv.sentMessages()
+	if len(sent) != 2 || !strings.Contains(sent[1].Text, reference.Text) ||
+		!strings.Contains(sent[1].Text, "Why is this important?") ||
+		!strings.Contains(sent[1].Text, source.Text) {
+		t.Fatalf("provider did not receive exact selection and full turn: %#v", sent)
+	}
+	reference.Text = "words not present in the rendered message"
+	_, err = h.svc.Send(ctx, testSession, ports.ChatUserMessage{
+		Text: "Do not send", Origin: domain.MessageOriginHuman,
+		Excerpts: []ports.ChatExcerptReference{reference},
+	})
+	if !errors.Is(err, chatsvc.ErrExcerptInvalid) || !strings.Contains(err.Error(), "selection does not match") {
+		t.Fatalf("unrelated selection error = %v", err)
+	}
+}
+
 func TestSendExcerptWaitsForCompletedPairedTurn(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

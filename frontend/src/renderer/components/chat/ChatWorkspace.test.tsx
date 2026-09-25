@@ -394,6 +394,78 @@ describe("ChatWorkspace timeline", () => {
 		}
 	});
 
+	it("does not offer message controls as transcript selections", () => {
+		const snapshot = idleSnapshot(chatFixture);
+		render(<ChatWorkspace snapshot={snapshot} onSend={vi.fn()} />);
+		const control = screen.getAllByRole("button", { name: "Copy user message" })[0]!;
+		const selection = {
+			anchorNode: control,
+			focusNode: control,
+			isCollapsed: false,
+			rangeCount: 1,
+			toString: () => "Copy user message",
+		} as unknown as Selection;
+		const getSelection = vi.spyOn(window, "getSelection").mockReturnValue(selection);
+		try {
+			fireEvent.mouseUp(screen.getByRole("log", { name: "Conversation" }));
+			expect(screen.queryByRole("button", { name: "Add to chat" })).not.toBeInTheDocument();
+		} finally {
+			getSelection.mockRestore();
+		}
+	});
+
+	it("stages an assistant selection spanning rendered Markdown formatting", async () => {
+		const snapshot = idleSnapshot({
+			...chatFixture,
+			items: chatFixture.items.map((item) =>
+				item.kind === "message" && item.id === "m-2"
+					? { ...item, text: "Use **bold** text." }
+					: item,
+			),
+		});
+		render(<ChatWorkspace snapshot={snapshot} onSend={vi.fn()} />);
+		const paragraph = screen.getByText("bold", { exact: true }).closest("p");
+		if (!paragraph?.firstChild || !paragraph.lastChild) throw new Error("formatted message is missing");
+		const selection = {
+			anchorNode: paragraph.firstChild,
+			focusNode: paragraph.lastChild,
+			isCollapsed: false,
+			rangeCount: 1,
+			toString: () => " Use bold text ",
+			getRangeAt: () => ({ getBoundingClientRect: () => ({ left: 100, top: 100, width: 80, height: 18 }) }),
+			removeAllRanges: vi.fn(),
+		} as unknown as Selection;
+		const getSelection = vi.spyOn(window, "getSelection").mockReturnValue(selection);
+		try {
+			fireEvent.mouseUp(screen.getByRole("log", { name: "Conversation" }));
+			await userEvent.click(screen.getByRole("button", { name: "Add to chat" }));
+			expect(screen.getByLabelText("Referenced messages")).toHaveTextContent("Use bold text");
+			expect(readChatSessionDraft(snapshot.sessionId).composer.excerpts?.[0]?.text).toBe(" Use bold text ");
+		} finally {
+			getSelection.mockRestore();
+		}
+	});
+
+	it("does not capture a code-block toolbar as source text", () => {
+		render(<ChatWorkspace snapshot={idleSnapshot(chatFixture)} onSend={vi.fn()} />);
+		const control = screen.getAllByRole("button", { name: "Copy code" })[0]!;
+		const selection = {
+			anchorNode: control,
+			focusNode: control,
+			isCollapsed: false,
+			rangeCount: 1,
+			toString: () => "Copy code",
+			getRangeAt: () => ({ getBoundingClientRect: () => ({ left: 100, top: 100, width: 80, height: 18 }) }),
+		} as unknown as Selection;
+		const getSelection = vi.spyOn(window, "getSelection").mockReturnValue(selection);
+		try {
+			fireEvent.mouseUp(screen.getByRole("log", { name: "Conversation" }));
+			expect(screen.queryByRole("button", { name: "Add to chat" })).not.toBeInTheDocument();
+		} finally {
+			getSelection.mockRestore();
+		}
+	});
+
 	it("offers selected transcript text to a new read-only side chat", async () => {
 		const snapshot = { ...idleSnapshot(chatFixture), capabilities: ["read_only"] };
 		const onCreateSideChat = vi.fn().mockResolvedValue({ id: "side-1" });

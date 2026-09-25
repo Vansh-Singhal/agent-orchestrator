@@ -372,7 +372,7 @@ export const ChatComposer = memo(function ChatComposer({
 		if (!excerptSnapshot) return null;
 		const source = excerptSnapshot?.items.find((item) => item.kind === "message" && item.id === excerpt.messageId);
 		if (!source || source.kind !== "message" || !source.turnId) return "The referenced message is no longer in the active conversation.";
-		if (source.revision !== excerpt.revision || !source.text.includes(excerpt.text)) return "The referenced message changed. Select the text again.";
+		if (source.revision !== excerpt.revision) return "The referenced message changed. Select the text again.";
 		const turn = excerptSnapshot?.turns.find((item) => item.id === source.turnId);
 		if (!turn) return "The referenced turn is unavailable.";
 		if (turn.state === "queued" || turn.state === "running") return "Waiting for the referenced turn to finish. Your draft is saved; Send will be enabled afterward.";

@@ -28,8 +28,10 @@ var ErrNoController = errors.New("no live chat controller for session")
 var ErrNotChatMode = errors.New("session is not in chat mode")
 
 var (
+	// ErrExcerptInvalid reports an invalid or unverified excerpt selection.
 	ErrExcerptInvalid = errors.New("chat excerpt is invalid")
-	ErrExcerptStale   = errors.New("chat excerpt is stale")
+	// ErrExcerptStale reports a reference to a changed or inactive source turn.
+	ErrExcerptStale = errors.New("chat excerpt is stale")
 )
 
 const (
@@ -1138,8 +1140,14 @@ func hydrateExcerptReferences(ctx context.Context, controller *Controller, reade
 		if !found {
 			return fmt.Errorf("%w: source message disappeared or left the active conversation", ErrExcerptStale)
 		}
-		if source.Revision != excerpt.Revision || !strings.Contains(source.Text, text) {
-			return fmt.Errorf("%w: source message changed or no longer contains the selection", ErrExcerptStale)
+		if source.Revision != excerpt.Revision {
+			return fmt.Errorf("%w: source message changed; select the text again", ErrExcerptStale)
+		}
+		if len(source.Text) > maxExcerptContextBytes {
+			return fmt.Errorf("%w: attached exchange exceeds %d bytes", ErrExcerptInvalid, maxExcerptContextBytes)
+		}
+		if !sourceContainsExcerptSelection(source, text) {
+			return fmt.Errorf("%w: selection does not match the referenced message; select text from its message body again", ErrExcerptInvalid)
 		}
 		if source.Streaming {
 			return fmt.Errorf("%w: source message is still streaming", ErrExcerptStale)
@@ -1164,7 +1172,7 @@ func hydrateExcerptReferences(ctx context.Context, controller *Controller, reade
 		if turn.State != domain.TurnStateCompleted {
 			return fmt.Errorf("%w: source turn is %s; a complete paired response is unavailable", ErrExcerptStale, turn.State)
 		}
-		context := ports.ChatExcerptContext{Selection: text, SourceMessageID: source.ID, SourceRole: string(source.Role), SourceText: source.Text}
+		excerptContext := ports.ChatExcerptContext{Selection: text, SourceMessageID: source.ID, SourceRole: string(source.Role), SourceText: source.Text}
 		var human, assistant bool
 		for _, related := range rows.Messages {
 			if related.TurnID != source.TurnID || related.Streaming || related.Text == "" {
@@ -1177,7 +1185,7 @@ func hydrateExcerptReferences(ctx context.Context, controller *Controller, reade
 			} else {
 				continue
 			}
-			context.Messages = append(context.Messages, ports.ChatExcerptMessage{Role: string(related.Role), Text: related.Text})
+			excerptContext.Messages = append(excerptContext.Messages, ports.ChatExcerptMessage{Role: string(related.Role), Text: related.Text})
 			contextBytes += len(related.Text)
 		}
 		if !human || !assistant {
@@ -1187,7 +1195,7 @@ func hydrateExcerptReferences(ctx context.Context, controller *Controller, reade
 			return fmt.Errorf("%w: attached exchange exceeds %d bytes", ErrExcerptInvalid, maxExcerptContextBytes)
 		}
 		msg.Content = append(msg.Content, ports.ChatContent{
-			Type: "excerpt", Excerpt: &context,
+			Type: "excerpt", Excerpt: &excerptContext,
 		})
 	}
 	msg.Excerpts = nil
