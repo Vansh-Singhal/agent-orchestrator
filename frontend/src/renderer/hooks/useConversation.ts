@@ -121,6 +121,7 @@ type ConversationDispatchTrackingBySession = Record<string, ConversationDispatch
 export type ConversationLocalEcho = {
 	clientMessageId: string;
 	text: string;
+	excerpts?: WireExcerptReference[];
 	createdAt: string;
 	/** Filled after the daemon accepts the send, then used for exact reconciliation. */
 	turnId?: string;
@@ -418,6 +419,7 @@ export function useConversationCommands(sessionId: string | undefined) {
 			addConversationLocalEcho(queryClient, variables.targetSessionId, {
 				clientMessageId: variables.clientMessageId,
 				text: variables.input.text,
+				excerpts: variables.input.excerpts,
 				createdAt: new Date().toISOString(),
 			});
 			queryClient.setQueryData<ConversationDispatchTrackingBySession>(
@@ -1642,6 +1644,12 @@ function toMessage(wire: WireMessage): ConversationMessage {
 			mimeType: item.mimeType || undefined,
 			uri: item.uri || undefined,
 			name: item.name || undefined,
+			excerpt: item.excerpt ? {
+				selection: item.excerpt.selection,
+				sourceRole: item.excerpt.sourceRole,
+				sourceText: item.excerpt.sourceText,
+				messages: item.excerpt.messages,
+			} : undefined,
 		})),
 		editAvailable: wire.editAvailable ?? undefined,
 		streaming: wire.streaming,

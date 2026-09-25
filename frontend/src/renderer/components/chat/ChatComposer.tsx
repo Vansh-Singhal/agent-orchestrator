@@ -46,12 +46,13 @@ import {
 	type ReactElement,
 	type ReactNode,
 } from "react";
-import { ArrowUp, Loader2, MessageSquareQuote, Plus, Square, X } from "lucide-react";
+import { ArrowUp, Loader2, Plus, Square, X } from "lucide-react";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "../../lib/utils";
 import { apiErrorCode, apiErrorMessage, getApiBaseUrl } from "../../lib/api-client";
 import { ComposerSuggestMenu } from "./ComposerSuggestMenu";
+import { ExcerptSelectionChip } from "./ExcerptSelectionChip";
 import {
 	ComposerEditor,
 	type ComposerEditorHandle,
@@ -67,7 +68,7 @@ import {
 	type FileAttachmentPayload,
 } from "../../hooks/useFileAttachments";
 import { File } from "lucide-react";
-import type { ChatSkill, ChatSteerOutcome } from "../../types/conversation";
+import type { ChatSkill, ChatSteerOutcome, ConversationSnapshot } from "../../types/conversation";
 import {
 	acknowledgeChatComposerMutation,
 	beginChatComposerMutation,
@@ -184,6 +185,7 @@ export const ChatComposer = memo(function ChatComposer({
 	autoFocus = true,
 	draftSessionId,
 	draftSessionIncarnation,
+	excerptSnapshot,
 	acceptedClientMessageIds,
 }: {
 	onSend: (
@@ -193,6 +195,7 @@ export const ChatComposer = memo(function ChatComposer({
 		retainedContent?: number[],
 		excerpts?: ChatDraftExcerptReference[],
 	) => void | Promise<unknown>;
+	excerptSnapshot?: ConversationSnapshot;
 	settings?: ReactNode;
 	/** A provider decision that temporarily replaces ordinary message entry. */
 	approval?: ReactNode;
@@ -365,6 +368,18 @@ export const ChatComposer = memo(function ChatComposer({
 	const contextReferences = draftScope
 		? readChatSessionDraft(draftScope).composer.excerpts ?? []
 		: [];
+	const excerptReadiness = contextReferences.map((excerpt) => {
+		if (!excerptSnapshot) return null;
+		const source = excerptSnapshot?.items.find((item) => item.kind === "message" && item.id === excerpt.messageId);
+		if (!source || source.kind !== "message" || !source.turnId) return "The referenced message is no longer in the active conversation.";
+		if (source.revision !== excerpt.revision || !source.text.includes(excerpt.text)) return "The referenced message changed. Select the text again.";
+		const turn = excerptSnapshot?.turns.find((item) => item.id === source.turnId);
+		if (!turn) return "The referenced turn is unavailable.";
+		if (turn.state === "queued" || turn.state === "running") return "Waiting for the referenced turn to finish. Your draft is saved; Send will be enabled afterward.";
+		if (turn.state !== "completed") return "The referenced turn did not complete, so a paired response is unavailable.";
+		return null;
+	});
+	const excerptBlocked = excerptReadiness.some(Boolean);
 	const [appliedAcceptanceSequence, setAppliedAcceptanceSequence] = useState(0);
 	const composerRevision = useRef(persistedDraft?.composer.revision ?? 0);
 	const synchronouslyClearedDeliveryRevision = useRef<number | undefined>(undefined);
@@ -500,6 +515,7 @@ export const ChatComposer = memo(function ChatComposer({
 	);
 	const canSend =
 		(hasText || staged) &&
+		!excerptBlocked &&
 		(savingQueuedEdit || !busy) &&
 		!disabled &&
 		!steerPending &&
@@ -1032,6 +1048,7 @@ export const ChatComposer = memo(function ChatComposer({
 		const canSubmitNow =
 			(body.length > 0 || hasAttachments || contextReferences.length > 0 || Boolean(recoveringDelivery)) &&
 			(!busy || savingQueuedEdit || recoveringDelivery?.state === "accepted") &&
+			(!excerptBlocked || Boolean(recoveringDelivery)) &&
 			!disabled && !steerPending && !savingQueuedEditPending &&
 			!composerMutation.pending &&
 			(!draftMutationPending || Boolean(recoveringDelivery)) &&
@@ -1528,16 +1545,13 @@ export const ChatComposer = memo(function ChatComposer({
 					</ul>
 				) : null}
 				{contextReferences.length > 0 ? (
-					<ul className="flex flex-wrap gap-1.5" aria-label="Referenced messages">
+					<><ul className="flex flex-wrap gap-1.5" aria-label="Referenced messages">
 						{contextReferences.map((excerpt) => (
 							<li
 								key={excerpt.id}
 								className="flex max-w-full items-center gap-1.5 rounded border border-logo-accent/30 bg-logo-accent/8 px-2 py-1"
 							>
-								<MessageSquareQuote aria-hidden="true" className="size-3.5 shrink-0 text-logo-accent" />
-								<span className="max-w-[280px] truncate text-[11px] text-muted-foreground" title={excerpt.text}>
-									{excerpt.role === "assistant" ? "Agent" : "You"}: “{excerpt.text}”
-								</span>
+								<ExcerptSelectionChip selection={excerpt.text} role={excerpt.role} />
 								<button
 									type="button"
 									disabled={controlsDisabled || draftMutationPending}
@@ -1557,7 +1571,7 @@ export const ChatComposer = memo(function ChatComposer({
 								</button>
 							</li>
 						))}
-					</ul>
+					</ul>{excerptReadiness.filter(Boolean).map((reason, index) => <p key={index} role="status" className="text-xs text-amber-600">{reason}</p>)}</>
 				) : null}
 
 				<ComposerEditor

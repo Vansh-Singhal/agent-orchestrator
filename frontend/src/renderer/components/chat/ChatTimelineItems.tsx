@@ -580,6 +580,7 @@ export function HumanMessage({
 					)}
 				>
 					{body ? <p className="break-words whitespace-pre-wrap text-pretty">{body}</p> : null}
+					<ConversationContentItems content={(message.content ?? []).filter((item) => item.type === "excerpt")} ariaLabel="Referenced selections" imageLabel="Image" className={cn(body && "mt-2")} />
 					<StagedAttachmentItems
 						paths={attachments}
 						sessionId={sessionId}

@@ -33,8 +33,9 @@ var (
 )
 
 const (
-	maxExcerptReferences = 8
-	maxExcerptTextBytes  = 24 * 1024
+	maxExcerptReferences   = 8
+	maxExcerptTextBytes    = 24 * 1024
+	maxExcerptContextBytes = 128 * 1024
 )
 
 // SessionReader is the session-fact surface the service needs. It reads the
@@ -1055,6 +1056,12 @@ func (s *Service) Send(
 		}
 		return domain.ConversationTurn{}, err
 	}
+	if err := s.prepareExcerptSend(ctx, controller, &msg); err != nil {
+		if s.reports != nil {
+			_ = s.reports.ReleasePiggyback(ctx, reports, err)
+		}
+		return domain.ConversationTurn{}, err
+	}
 	turn, err := controller.Send(ctx, msg)
 	if err != nil {
 		if s.reports != nil {
@@ -1076,6 +1083,13 @@ func (s *Service) SendForOwner(ctx context.Context, owner domain.ConversationOwn
 	if err != nil {
 		return domain.ConversationTurn{}, err
 	}
+	if err := s.prepareExcerptSend(ctx, controller, &msg); err != nil {
+		return domain.ConversationTurn{}, err
+	}
+	return controller.Send(ctx, msg)
+}
+
+func (s *Service) prepareExcerptSend(ctx context.Context, controller *Controller, msg *ports.ChatUserMessage) error {
 	// A crash-safe retry may arrive after its source message changed. Once this
 	// client id is already durable, the controller's existing idempotency path is
 	// authoritative and must not be blocked by re-validating old selection text.
@@ -1083,18 +1097,15 @@ func (s *Service) SendForOwner(ctx context.Context, owner domain.ConversationOwn
 		if _, found, lookupErr := controller.store.ConversationMessageByClientID(
 			ctx, controller.conversation.ID, msg.ClientMessageID,
 		); lookupErr != nil {
-			return domain.ConversationTurn{}, fmt.Errorf("read message delivery: %w", lookupErr)
+			return fmt.Errorf("read message delivery: %w", lookupErr)
 		} else if found {
-			return controller.Send(ctx, msg)
+			return nil
 		}
 	}
-	if err := hydrateExcerptReferences(ctx, controller, &msg); err != nil {
-		return domain.ConversationTurn{}, err
-	}
-	return controller.Send(ctx, msg)
+	return hydrateExcerptReferences(ctx, controller, s.reader, msg)
 }
 
-func hydrateExcerptReferences(ctx context.Context, controller *Controller, msg *ports.ChatUserMessage) error {
+func hydrateExcerptReferences(ctx context.Context, controller *Controller, reader SnapshotReader, msg *ports.ChatUserMessage) error {
 	if len(msg.Excerpts) == 0 {
 		return nil
 	}
@@ -1102,8 +1113,13 @@ func hydrateExcerptReferences(ctx context.Context, controller *Controller, msg *
 		return fmt.Errorf("%w: at most %d excerpts may be attached", ErrExcerptInvalid, maxExcerptReferences)
 	}
 	total := 0
+	contextBytes := 0
+	rows, err := reader.LoadConversationSnapshot(ctx, controller.conversation.ID)
+	if err != nil {
+		return fmt.Errorf("read excerpt conversation: %w", err)
+	}
 	for _, excerpt := range msg.Excerpts {
-		text := strings.TrimSpace(excerpt.Text)
+		text := excerpt.Text
 		if excerpt.ConversationID != controller.conversation.ID || excerpt.MessageID == "" || text == "" || excerpt.Revision < 0 {
 			return fmt.Errorf("%w: source conversation, message, revision, and text are required", ErrExcerptInvalid)
 		}
@@ -1111,16 +1127,58 @@ func hydrateExcerptReferences(ctx context.Context, controller *Controller, msg *
 		if total > maxExcerptTextBytes {
 			return fmt.Errorf("%w: attached excerpts exceed %d bytes", ErrExcerptInvalid, maxExcerptTextBytes)
 		}
-		source, found, err := controller.store.ConversationMessageByID(ctx, excerpt.ConversationID, excerpt.MessageID)
-		if err != nil {
-			return fmt.Errorf("read excerpt source: %w", err)
+		var source domain.ConversationMessage
+		found := false
+		for _, candidate := range rows.Messages {
+			if candidate.ID == excerpt.MessageID {
+				source, found = candidate, true
+				break
+			}
 		}
 		if !found || source.Revision != excerpt.Revision || source.Streaming || !strings.Contains(source.Text, text) {
-			return fmt.Errorf("%w: source message changed or no longer contains the selection", ErrExcerptStale)
+			return fmt.Errorf("%w: source message changed, disappeared from the active conversation, or no longer contains the selection", ErrExcerptStale)
+		}
+		if source.TurnID == "" {
+			return fmt.Errorf("%w: source message has no paired turn", ErrExcerptInvalid)
+		}
+		var turn domain.ConversationTurn
+		turnFound := false
+		for _, candidate := range rows.Turns {
+			if candidate.ID == source.TurnID {
+				turn, turnFound = candidate, true
+				break
+			}
+		}
+		if !turnFound || turn.RolledBackAt != nil {
+			return fmt.Errorf("%w: source turn is no longer active", ErrExcerptStale)
+		}
+		if turn.State != domain.TurnStateCompleted {
+			return fmt.Errorf("%w: source turn is %s; wait for a completed response", ErrExcerptStale, turn.State)
+		}
+		context := ports.ChatExcerptContext{Selection: text, SourceMessageID: source.ID, SourceRole: string(source.Role), SourceText: source.Text}
+		var human, assistant bool
+		for _, related := range rows.Messages {
+			if related.TurnID != source.TurnID || related.Streaming || related.Text == "" {
+				continue
+			}
+			if related.Role == domain.MessageRoleUser && related.Origin == domain.MessageOriginHuman {
+				human = true
+			} else if related.Role == domain.MessageRoleAssistant {
+				assistant = true
+			} else {
+				continue
+			}
+			context.Messages = append(context.Messages, ports.ChatExcerptMessage{Role: string(related.Role), Text: related.Text})
+			contextBytes += len(related.Text)
+		}
+		if !human || !assistant {
+			return fmt.Errorf("%w: source turn has no complete human/agent text exchange", ErrExcerptStale)
+		}
+		if contextBytes > maxExcerptContextBytes {
+			return fmt.Errorf("%w: attached exchange exceeds %d bytes", ErrExcerptInvalid, maxExcerptContextBytes)
 		}
 		msg.Content = append(msg.Content, ports.ChatContent{
-			Type: "resource", URI: ports.ChatExcerptResourceURIPrefix + source.ID,
-			Name: fmt.Sprintf("%s message", source.Role), MIMEType: "text/plain", Text: text,
+			Type: "excerpt", Excerpt: &context,
 		})
 	}
 	msg.Excerpts = nil

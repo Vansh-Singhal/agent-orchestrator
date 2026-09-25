@@ -9628,6 +9628,8 @@ components:
       type: object
     ConversationContentSummaryResponse:
       properties:
+        excerpt:
+          $ref: '#/components/schemas/ConversationExcerptSummaryResponse'
         mimeType:
           type: string
         name:
@@ -9664,6 +9666,16 @@ components:
       - deletions
       - status
       type: object
+    ConversationExcerptMessageResponse:
+      properties:
+        role:
+          type: string
+        text:
+          type: string
+      required:
+      - role
+      - text
+      type: object
     ConversationExcerptReferenceRequest:
       properties:
         conversationId:
@@ -9680,6 +9692,24 @@ components:
       - messageId
       - revision
       - text
+      type: object
+    ConversationExcerptSummaryResponse:
+      properties:
+        messages:
+          items:
+            $ref: '#/components/schemas/ConversationExcerptMessageResponse'
+          type: array
+        selection:
+          type: string
+        sourceRole:
+          type: string
+        sourceText:
+          type: string
+      required:
+      - selection
+      - sourceRole
+      - sourceText
+      - messages
       type: object
     ConversationImageContentRequest:
       properties:

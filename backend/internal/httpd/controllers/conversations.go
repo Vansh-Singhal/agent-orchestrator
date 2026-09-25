@@ -1220,6 +1220,23 @@ func conversationContentSummary(msg domain.ConversationMessage) ([]ConversationC
 		if block.Type == "text" || ports.IsInternalReplayContent(block) {
 			continue
 		}
+		if block.Type == "excerpt" && block.Excerpt != nil {
+			excerpt := &ConversationExcerptSummaryResponse{
+				Selection: block.Excerpt.Selection, SourceRole: block.Excerpt.SourceRole,
+				SourceText: block.Excerpt.SourceText,
+			}
+			for _, related := range block.Excerpt.Messages {
+				excerpt.Messages = append(excerpt.Messages, ConversationExcerptMessageResponse{Role: related.Role, Text: related.Text})
+			}
+			summaries = append(summaries, ConversationContentSummaryResponse{Type: "excerpt", Excerpt: excerpt})
+			continue
+		}
+		if strings.HasPrefix(block.URI, ports.ChatExcerptResourceURIPrefix) {
+			summaries = append(summaries, ConversationContentSummaryResponse{
+				Type: "excerpt", Excerpt: &ConversationExcerptSummaryResponse{Selection: block.Text, SourceRole: strings.TrimSuffix(block.Name, " message"), SourceText: block.Text},
+			})
+			continue
+		}
 		name := block.Name
 		if name == "" && block.Type != "image" && block.Type != "resource" && block.Type != "resource_link" {
 			name = block.Type

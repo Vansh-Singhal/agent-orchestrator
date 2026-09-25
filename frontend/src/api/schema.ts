@@ -3319,6 +3319,7 @@ export interface components {
             options: components["schemas"]["ConversationConfigOptionResponse"][];
         };
         ConversationContentSummaryResponse: {
+            excerpt?: components["schemas"]["ConversationExcerptSummaryResponse"];
             mimeType?: string;
             name?: string;
             type: string;
@@ -3333,12 +3334,22 @@ export interface components {
             /** @enum {string} */
             status: "added" | "modified" | "deleted" | "renamed";
         };
+        ConversationExcerptMessageResponse: {
+            role: string;
+            text: string;
+        };
         ConversationExcerptReferenceRequest: {
             conversationId: string;
             messageId: string;
             /** Format: int64 */
             revision: number;
             text: string;
+        };
+        ConversationExcerptSummaryResponse: {
+            messages: components["schemas"]["ConversationExcerptMessageResponse"][];
+            selection: string;
+            sourceRole: string;
+            sourceText: string;
         };
         ConversationImageContentRequest: {
             data: string;

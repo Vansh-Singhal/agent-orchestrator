@@ -224,6 +224,11 @@ func TestConversationSnapshotExposesSafeEditContentAndBranchMetadata(t *testing.
 				ID: "retry", TurnID: "turn-retry", Sequence: 4, Role: domain.MessageRoleUser, Origin: domain.MessageOriginHuman,
 				Text: "inspect", ClientMessageID: "retry/turn-source", CreatedAt: now,
 			},
+			{
+				ID: "excerpt", Sequence: 5, Role: domain.MessageRoleUser, Origin: domain.MessageOriginHuman,
+				Text: "explain", CreatedAt: now,
+				DeliveryContentJSON: `[{"type":"excerpt","excerpt":{"selection":"chosen words","sourceMessageId":"source","sourceRole":"assistant","sourceText":"full agent answer","messages":[{"role":"user","text":"original question"},{"role":"assistant","text":"full agent answer"}]}},{"type":"resource","uri":"ao://conversation-excerpt/legacy","name":"assistant message","text":"old selection"}]`,
+			},
 		},
 		BranchPoints: []domain.ConversationBranchPoint{{
 			TurnID: "turn-edited", Position: 2, Total: 2, PreviousBranchID: "branch-root",
@@ -276,6 +281,14 @@ func TestConversationSnapshotExposesSafeEditContentAndBranchMetadata(t *testing.
 	}
 	if messages[2].(map[string]any)["editAvailable"] != false {
 		t.Fatalf("malformed message is editable: %#v", messages[2])
+	}
+	excerptContent := messages[4].(map[string]any)["content"].([]any)
+	if len(excerptContent) != 2 || excerptContent[0].(map[string]any)["excerpt"].(map[string]any)["selection"] != "chosen words" || excerptContent[1].(map[string]any)["excerpt"].(map[string]any)["selection"] != "old selection" {
+		t.Fatalf("excerpt summaries = %#v", excerptContent)
+	}
+	excerptJSON, _ := json.Marshal(excerptContent)
+	if bytes.Contains(excerptJSON, []byte("ao://")) {
+		t.Fatalf("excerpt summary leaked internal URI: %s", excerptJSON)
 	}
 	turns := body["turns"].([]any)
 	if turns[0].(map[string]any)["hasRetryAttempt"] != true {

@@ -152,6 +152,12 @@ export interface ConversationContentSummary {
 	mimeType?: string;
 	uri?: string;
 	name?: string;
+	excerpt?: {
+		selection: string;
+		sourceRole: string;
+		sourceText: string;
+		messages: { role: string; text: string }[];
+	};
 }
 
 export interface QueuedMessageEditOptions {

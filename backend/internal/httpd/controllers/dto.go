@@ -2097,10 +2097,23 @@ type EditConversationMessageRequest struct {
 // ConversationContentSummaryResponse is a lightweight attachment/resource chip.
 // Image bytes and embedded resource text never leave the durable server record.
 type ConversationContentSummaryResponse struct {
-	Type     string `json:"type"`
-	MIMEType string `json:"mimeType,omitempty"`
-	URI      string `json:"uri,omitempty"`
-	Name     string `json:"name,omitempty"`
+	Type     string                              `json:"type"`
+	MIMEType string                              `json:"mimeType,omitempty"`
+	URI      string                              `json:"uri,omitempty"`
+	Name     string                              `json:"name,omitempty"`
+	Excerpt  *ConversationExcerptSummaryResponse `json:"excerpt,omitempty"`
+}
+
+type ConversationExcerptSummaryResponse struct {
+	Selection  string                               `json:"selection"`
+	SourceRole string                               `json:"sourceRole"`
+	SourceText string                               `json:"sourceText"`
+	Messages   []ConversationExcerptMessageResponse `json:"messages"`
+}
+
+type ConversationExcerptMessageResponse struct {
+	Role string `json:"role"`
+	Text string `json:"text"`
 }
 
 // EditConversationMessageResponse identifies the newly selected branch and its

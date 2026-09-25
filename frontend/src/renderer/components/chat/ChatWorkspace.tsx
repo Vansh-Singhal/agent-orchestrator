@@ -1535,6 +1535,7 @@ function ChatWorkspaceContent({
 							>
 								{discarded > 0 ? <RolledBackNotice count={discarded} /> : null}
 								<ChatComposer
+									excerptSnapshot={snapshot}
 									key={`${draftScopeKey}:${queueEdit ? `${queueEdit.turnId}:${queueEdit.ownerId ?? queueEdit.expectedRevision ?? "legacy"}` : "composer"}`}
 									queuedDock={composerQueuedDock}
 									approval={composerApproval}
@@ -2747,6 +2748,13 @@ function Timeline({
 				role: "user",
 				origin: "human",
 				text: echo.text,
+				content: echo.excerpts?.map((excerpt) => {
+					const source = items.find((item) => item.kind === "message" && item.id === excerpt.messageId);
+					return {
+						type: "excerpt",
+						excerpt: { selection: excerpt.text, sourceRole: source?.kind === "message" ? source.role : "user", sourceText: excerpt.text, messages: [] },
+					};
+				}),
 				streaming: false,
 				delivery: echo.turnId ? "accepted" : "sending",
 				createdAt: echo.createdAt,

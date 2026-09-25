@@ -3120,6 +3120,7 @@ func newHarnessWithConversationAndStoreForHarness(
 	svc := chatsvc.New(chatsvc.Options{
 		Store:    chatStore,
 		Sessions: st,
+		Reader:   fullSnapshotReader(st),
 		StopProviderHost: func(context.Context, domain.SessionID) error {
 			h.hostStops.Add(1)
 			return nil
@@ -3217,11 +3218,13 @@ func TestSendVerifiesExcerptAndFallsBackToTextForProvider(t *testing.T) {
 			ProviderItemID: "excerpt-source", Delta: "Keep this exact sentence."},
 		ports.ChatEvent{Kind: ports.ChatEventMessageCompleted, ProviderTurnID: seed.ProviderTurnID,
 			ProviderItemID: "excerpt-source", Text: "Keep this exact sentence."},
+		ports.ChatEvent{Kind: ports.ChatEventMessageCompleted, ProviderTurnID: seed.ProviderTurnID,
+			ProviderItemID: "excerpt-source-2", Text: "This is the second answer block."},
 		ports.ChatEvent{Kind: ports.ChatEventTurnCompleted, ProviderTurnID: seed.ProviderTurnID,
 			TurnState: domain.TurnStateCompleted},
 	)
 	snapshot := h.awaitSnapshot(t, func(s store.ConversationSnapshot) bool {
-		return len(s.Messages) == 2 && len(s.Turns) == 1 && s.Turns[0].State == domain.TurnStateCompleted
+		return len(s.Messages) == 3 && len(s.Turns) == 1 && s.Turns[0].State == domain.TurnStateCompleted
 	})
 	source := snapshot.Messages[1]
 
@@ -3230,14 +3233,21 @@ func TestSendVerifiesExcerptAndFallsBackToTextForProvider(t *testing.T) {
 		Excerpts: []ports.ChatExcerptReference{{
 			ConversationID: h.ctrl.ConversationID(), MessageID: source.ID,
 			Revision: source.Revision, Text: "exact sentence",
+		}, {
+			ConversationID: h.ctrl.ConversationID(), MessageID: snapshot.Messages[0].ID,
+			Revision: snapshot.Messages[0].Revision, Text: "seed",
 		}},
 	})
 	if err != nil {
 		t.Fatalf("send with excerpt: %v", err)
 	}
 	sent := h.conv.sentMessages()
-	if len(sent) != 2 || !strings.Contains(sent[1].Text, "Referenced chat excerpt") ||
-		!strings.Contains(sent[1].Text, "exact sentence") || len(sent[1].Content) != 0 {
+	if len(sent) != 2 || !strings.Contains(sent[1].Text, "Referenced conversation turn") ||
+		!strings.Contains(sent[1].Text, "exact sentence") ||
+		!strings.Contains(sent[1].Text, "seed") ||
+		!strings.Contains(sent[1].Text, "Keep this exact sentence.") ||
+		!strings.Contains(sent[1].Text, "This is the second answer block.") ||
+		strings.Contains(sent[1].Text, ports.ChatExcerptResourceURIPrefix) || len(sent[1].Content) != 0 {
 		t.Fatalf("provider delivery = %#v", sent)
 	}
 	duplicate, err := h.svc.Send(ctx, testSession, ports.ChatUserMessage{
@@ -3260,6 +3270,35 @@ func TestSendVerifiesExcerptAndFallsBackToTextForProvider(t *testing.T) {
 	})
 	if !errors.Is(err, chatsvc.ErrExcerptStale) {
 		t.Fatalf("stale excerpt error = %v, want ErrExcerptStale", err)
+	}
+}
+
+func TestSendExcerptWaitsForCompletedPairedTurn(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	seed, err := h.svc.Send(ctx, testSession, ports.ChatUserMessage{
+		Text: "pending source prompt", ClientMessageID: "pending-excerpt-source", Origin: domain.MessageOriginHuman,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := h.awaitSnapshot(t, func(s store.ConversationSnapshot) bool { return len(s.Messages) == 1 })
+	source := before.Messages[0]
+	reference := ports.ChatExcerptReference{ConversationID: h.ctrl.ConversationID(), MessageID: source.ID, Revision: source.Revision, Text: "source prompt"}
+	_, err = h.svc.Send(ctx, testSession, ports.ChatUserMessage{Text: "follow up", Origin: domain.MessageOriginHuman, Excerpts: []ports.ChatExcerptReference{reference}})
+	if !errors.Is(err, chatsvc.ErrExcerptStale) || !strings.Contains(err.Error(), "wait for a completed response") {
+		t.Fatalf("pending turn error = %v", err)
+	}
+	h.conv.emit(
+		ports.ChatEvent{Kind: ports.ChatEventTurnStarted, ProviderTurnID: seed.ProviderTurnID},
+		ports.ChatEvent{Kind: ports.ChatEventMessageCompleted, ProviderTurnID: seed.ProviderTurnID, ProviderItemID: "pending-answer", Text: "completed reply"},
+		ports.ChatEvent{Kind: ports.ChatEventTurnCompleted, ProviderTurnID: seed.ProviderTurnID, TurnState: domain.TurnStateCompleted},
+	)
+	h.awaitSnapshot(t, func(s store.ConversationSnapshot) bool {
+		return len(s.Messages) == 2 && s.Turns[0].State == domain.TurnStateCompleted
+	})
+	if _, err := h.svc.Send(ctx, testSession, ports.ChatUserMessage{Text: "follow up", Origin: domain.MessageOriginHuman, Excerpts: []ports.ChatExcerptReference{reference}}); err != nil {
+		t.Fatalf("send after completion: %v", err)
 	}
 }
 
