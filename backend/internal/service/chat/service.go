@@ -1135,8 +1135,14 @@ func hydrateExcerptReferences(ctx context.Context, controller *Controller, reade
 				break
 			}
 		}
-		if !found || source.Revision != excerpt.Revision || source.Streaming || !strings.Contains(source.Text, text) {
-			return fmt.Errorf("%w: source message changed, disappeared from the active conversation, or no longer contains the selection", ErrExcerptStale)
+		if !found {
+			return fmt.Errorf("%w: source message disappeared or left the active conversation", ErrExcerptStale)
+		}
+		if source.Revision != excerpt.Revision || !strings.Contains(source.Text, text) {
+			return fmt.Errorf("%w: source message changed or no longer contains the selection", ErrExcerptStale)
+		}
+		if source.Streaming {
+			return fmt.Errorf("%w: source message is still streaming", ErrExcerptStale)
 		}
 		if source.TurnID == "" {
 			return fmt.Errorf("%w: source message has no paired turn", ErrExcerptInvalid)
@@ -1152,8 +1158,11 @@ func hydrateExcerptReferences(ctx context.Context, controller *Controller, reade
 		if !turnFound || turn.RolledBackAt != nil {
 			return fmt.Errorf("%w: source turn is no longer active", ErrExcerptStale)
 		}
-		if turn.State != domain.TurnStateCompleted {
+		if turn.State == domain.TurnStateRunning || turn.State == domain.TurnStateQueued {
 			return fmt.Errorf("%w: source turn is %s; wait for a completed response", ErrExcerptStale, turn.State)
+		}
+		if turn.State != domain.TurnStateCompleted {
+			return fmt.Errorf("%w: source turn is %s; a complete paired response is unavailable", ErrExcerptStale, turn.State)
 		}
 		context := ports.ChatExcerptContext{Selection: text, SourceMessageID: source.ID, SourceRole: string(source.Role), SourceText: source.Text}
 		var human, assistant bool
