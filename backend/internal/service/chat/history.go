@@ -81,7 +81,7 @@ const sideChatSystemPrompt = `You are answering in AO's /btw side chat. This con
 // CreateSideChat forks the active provider context at its current head, reopens
 // the child under an enforced read-only policy, and durably marks it as /btw.
 func (s *Service) CreateSideChat(ctx context.Context, id domain.SessionID, label string) (domain.ConversationBranch, error) {
-	gate := s.controllerGate(id)
+	gate := s.controllerGate(domain.SessionConversationOwner(id))
 	if err := gate.lock(ctx); err != nil {
 		return domain.ConversationBranch{}, err
 	}
@@ -126,7 +126,7 @@ func (s *Service) CreateSideChat(ctx context.Context, id domain.SessionID, label
 			source.AbortHandoff()
 		}
 	}()
-	cfg, driver, err := s.branchLaunchConfig(id, source)
+	cfg, driver, err := s.branchLaunchConfig(source)
 	if err != nil {
 		return domain.ConversationBranch{}, err
 	}
@@ -178,7 +178,7 @@ func (s *Service) CreateSideChat(ctx context.Context, id domain.SessionID, label
 	conversation := source.conversation
 	conversation.ActiveBranchID = branch.ID
 	conversation.Settings.ApprovalMode = domain.PermissionModeReadOnly
-	replacement := newController(id, conversation, generation, source.harness, provider, s.store, s.activity, s.log, s.newID, s.now, s.onAccountChanged, s.onCodexCapacityChanged)
+	replacement := newController(id, source.owner(), conversation, generation, source.harness, provider, s.store, s.activity, s.log, s.newID, s.now, s.onAccountChanged, s.onCodexCapacityChanged)
 	if err := s.store.CreateAndActivateConversationBranch(operationCtx, id, branch, generation, s.now()); err != nil {
 		_ = cleanupUnpublishedConversation(provider, true)
 		return restore(fmt.Errorf("activate side chat: %w", err))
@@ -283,7 +283,7 @@ func (s *Service) EditMessage(
 	turnID string,
 	msg ports.ChatUserMessage,
 ) (EditMessageResult, error) {
-	gate := s.controllerGate(id)
+	gate := s.controllerGate(domain.SessionConversationOwner(id))
 	if err := gate.lock(ctx); err != nil {
 		return EditMessageResult{}, err
 	}
@@ -399,7 +399,7 @@ func (s *Service) EditMessage(
 		}
 	}()
 
-	cfg, driver, err := s.branchLaunchConfig(id, source)
+	cfg, driver, err := s.branchLaunchConfig(source)
 	if err != nil {
 		return reject(EditMessageResult{}, err)
 	}
@@ -548,7 +548,7 @@ func (s *Service) EditMessage(
 	}
 	conversation := source.conversation
 	conversation.ActiveBranchID = branchID
-	replacement := newController(id, conversation, generation, source.harness, provider, s.store, s.activity, s.log, s.newID, s.now, s.onAccountChanged, s.onCodexCapacityChanged)
+	replacement := newController(id, source.owner(), conversation, generation, source.harness, provider, s.store, s.activity, s.log, s.newID, s.now, s.onAccountChanged, s.onCodexCapacityChanged)
 	if err := s.store.CreateAndActivateConversationBranch(
 		operationCtx, id, branch, generation, s.now(),
 	); err != nil {
@@ -946,7 +946,7 @@ func (s *Service) persistRejectedEditDelivery(
 // ActivateBranch resumes a durable provider branch in the same worktree and
 // swaps controllers without sending a new prompt.
 func (s *Service) ActivateBranch(ctx context.Context, id domain.SessionID, branchID string) (string, error) {
-	gate := s.controllerGate(id)
+	gate := s.controllerGate(domain.SessionConversationOwner(id))
 	if err := gate.lock(ctx); err != nil {
 		return "", err
 	}
@@ -974,7 +974,7 @@ func (s *Service) activateBranchLocked(ctx context.Context, id domain.SessionID,
 	if branch.Active {
 		return branch.ID, nil
 	}
-	cfg, driver, err := s.branchLaunchConfig(id, source)
+	cfg, driver, err := s.branchLaunchConfig(source)
 	if err != nil {
 		return "", err
 	}
@@ -1042,7 +1042,7 @@ func (s *Service) activateBranchLocked(ctx context.Context, id domain.SessionID,
 	if domain.NormalizeConversationBranchPurpose(branch.Purpose) == domain.ConversationBranchPurposeSide {
 		conversation.Settings.ApprovalMode = domain.PermissionModeReadOnly
 	}
-	replacement := newController(id, conversation, generation, source.harness, provider, s.store, s.activity, s.log, s.newID, s.now, s.onAccountChanged, s.onCodexCapacityChanged)
+	replacement := newController(id, source.owner(), conversation, generation, source.harness, provider, s.store, s.activity, s.log, s.newID, s.now, s.onAccountChanged, s.onCodexCapacityChanged)
 	if err := s.store.ActivateConversationBranch(operationCtx, id, conversation.ID, branch.ID,
 		branch.ProviderConversationID, generation, s.now()); err != nil {
 		_ = cleanupUnpublishedConversation(provider, true)
@@ -1084,12 +1084,17 @@ func branchMCPServers(branch domain.ConversationBranch, servers []ports.ChatMCPS
 }
 
 func (s *Service) branchLaunchConfig(
-	id domain.SessionID,
 	source *Controller,
 ) (StartConfig, ports.ChatDriver, error) {
 	s.mu.RLock()
-	cfg, ok := s.startConfigs[id]
-	current := s.controllers[id]
+	cfg, ok := s.startConfigs[source.owner()]
+	// Controllers are registered by typed owner. Session history operations still
+	// address the worker by session id, so use the source's owner here rather
+	// than treating the legacy session index as the authority. In particular, a
+	// branch replacement must update the typed entry before the old controller's
+	// cleanup goroutine runs, otherwise that goroutine can remove the new
+	// session controller.
+	current := s.ownerControllers[source.owner()]
 	s.mu.RUnlock()
 	if !ok || current != source {
 		return StartConfig{}, nil, ErrControllerHandoff
@@ -1157,7 +1162,7 @@ func (s *Service) restoreClosedSourceController(
 	conversation := source.conversation
 	conversation.ActiveBranchID = branch.ID
 	replacement := newController(
-		id, conversation, generation, source.harness, provider, s.store, s.activity, s.log, s.newID, s.now, s.onAccountChanged, s.onCodexCapacityChanged)
+		id, source.owner(), conversation, generation, source.harness, provider, s.store, s.activity, s.log, s.newID, s.now, s.onAccountChanged, s.onCodexCapacityChanged)
 	if err := s.store.ActivateConversationBranch(recoveryCtx, id, conversation.ID, branch.ID,
 		providerConversationID, generation, s.now()); err != nil {
 		_ = provider.Close()
@@ -1189,8 +1194,9 @@ func (s *Service) installStartedBranchController(
 	source, replacement *Controller,
 	sourceBranchID string,
 ) error {
+	owner := source.owner()
 	s.mu.Lock()
-	if s.controllers[id] != source {
+	if s.ownerControllers[owner] != source {
 		s.mu.Unlock()
 		_ = replacement.Terminate(ctx)
 		if err := s.store.ActivateConversationBranch(ctx, id, source.conversation.ID,
@@ -1200,15 +1206,21 @@ func (s *Service) installStartedBranchController(
 		return ErrControllerHandoff
 	}
 	source.prepareBranchHandoffStop()
-	s.controllers[id] = replacement
-	if cfg, ok := s.startConfigs[id]; ok {
+	s.ownerControllers[owner] = replacement
+	// Keep the session index as the backwards-compatible lookup path used by
+	// worker chat commands. Review owners never share this index, so replacing a
+	// worker controller cannot affect a reviewer controller for the same session.
+	if owner.Kind == domain.ConversationOwnerSession {
+		s.controllers[id] = replacement
+	}
+	if cfg, ok := s.startConfigs[owner]; ok {
 		cfg.ExpectedControllerOwner.Harness = cfg.Harness
 		cfg.ExpectedControllerOwner.Mode = domain.SessionModeChat
 		cfg.ExpectedControllerOwner.IsTerminated = false
 		cfg.ExpectedControllerOwner.RuntimeLaunchID = ""
 		cfg.ExpectedControllerOwner.ProviderConversationID = replacement.ProviderConversationID()
 		cfg.ExpectedControllerOwner.ControllerGeneration = replacement.Generation()
-		s.startConfigs[id] = cfg
+		s.startConfigs[owner] = cfg
 	}
 	s.mu.Unlock()
 
@@ -1216,8 +1228,11 @@ func (s *Service) installStartedBranchController(
 		replacement.Wait()
 		replacement.waitForBranchHandoff()
 		s.mu.Lock()
-		if current := s.controllers[id]; current == replacement {
-			delete(s.controllers, id)
+		if current := s.ownerControllers[owner]; current == replacement {
+			delete(s.ownerControllers, owner)
+			if owner.Kind == domain.ConversationOwnerSession {
+				delete(s.controllers, id)
+			}
 		}
 		s.mu.Unlock()
 	}()
