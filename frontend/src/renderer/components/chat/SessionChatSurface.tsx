@@ -47,6 +47,7 @@ import type { TerminalTarget } from "../../types/terminal";
 import type { AgentSwitchSummary, WorkspaceSession } from "../../types/workspace";
 import { AgentSwitchProgressTrack } from "../AgentSwitchProgressTrack";
 import { ChatWorkspace } from "./ChatWorkspace";
+import { useIndependentSideChats } from "./IndependentSideChats";
 import { hasProviderPermissionMode } from "./TurnSettingsBar";
 
 export interface ConversationWorkState {
@@ -123,6 +124,8 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 	controllerTransitioning,
 	newWorkDisabled,
 	onConversationWorkChange,
+	onSideOpened,
+	inspectorOpen = false,
 }: {
 	session: WorkspaceSession;
 	reviewerTerminal?: { handleId: string; harness: string };
@@ -170,6 +173,8 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 	newWorkDisabled?: boolean;
 	/** Reports accepted Chat work that must inform an interface-switch policy choice. */
 	onConversationWorkChange?: (state: ConversationWorkState) => void;
+	onSideOpened?: () => void;
+	inspectorOpen?: boolean;
 }) {
 	const {
 		snapshot: queriedSnapshot,
@@ -184,6 +189,7 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 	// its data. Treat that snapshot as unknown everywhere, especially at the work
 	// boundary that decides whether switching to Terminal needs user consent.
 	const snapshot = queriedSnapshot?.sessionId === session.id ? queriedSnapshot : undefined;
+	const sideChatActive = Boolean(snapshot?.sideChats?.some((sideChat) => sideChat.active));
 	const commands = useConversationCommands(session.id);
 	const projectPermissions = useRememberProjectPermissions(session.workspaceId, snapshot?.harness);
 	const {
@@ -339,6 +345,15 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 	);
 	const { paths, truncated } = useWorkspaceFilePaths(session.id, Boolean(snapshot));
 	const stageAttachments = useStageAttachments(session.id);
+	const sideModelOption = providerOptions.find((option) => option.category === "model" || option.id === "model");
+	const sideEffortOption = providerOptions.find((option) => option.category === "thought_level" || option.category === "effort" || option.id === "effort");
+	const sideEfforts = sideEffortOption?.choices.map((choice) => choice.value);
+	const sideModels = models.length ? models : (sideModelOption?.choices.map((choice) => ({
+		id: choice.value, displayName: choice.name || choice.value,
+		default: choice.value === sideModelOption.currentValue,
+		efforts: sideEfforts, defaultEffort: sideEffortOption?.currentValue,
+	})) ?? []);
+	const sideChats = useIndependentSideChats(session.id, sideModels, skills, stageAttachments, Boolean(snapshot && can(snapshot, "images")));
 	const openLinkInBrowser = useSessionBrowserLink(session, onOpenLinkInBrowser, paths);
 	const openSessionLink = useSessionLinkNavigation();
 	const conversationLinkBaselines = useRef(new Map<string, ConversationLinkBaseline>());
@@ -478,7 +493,8 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 	}
 
 	return (
-		<div className="relative h-full min-h-0">
+		<div className="relative flex h-full min-h-0">
+		<div className="min-w-0 flex-1">
 			<ChatWorkspace
 				key={session.id}
 				snapshot={renderSnapshot}
@@ -508,18 +524,52 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 				sessionTabAction={sessionTabAction}
 				sessionTabActionWide={sessionTabActionWide}
 				tabStripAction={tabStripAction}
-				workspaceTabs={workspaceTabs}
+				workspaceTabs={[
+					...(workspaceTabs ?? []),
+					...sideChats.sides.map((side, index) => ({
+						key: `side:${side.id}`,
+						onSelect: () => { sideChats.show(side.id); onSideOpened?.(); },
+						content: <div className="inline-flex h-full items-center border-r border-border bg-overlay text-sm">
+							<button type="button" className="h-full px-3" onClick={() => { sideChats.show(side.id); onSideOpened?.(); }} aria-label={`Show side chat ${index + 1}`}>/btw {index + 1}</button>
+							<button type="button" className="h-full px-2" onClick={() => void sideChats.close(side.id)} aria-label={`Close side chat ${index + 1}`}>×</button>
+						</div>,
+					})),
+				]}
 				workspaceTabActions={workspaceTabActions}
 				workspaceActiveTabKey={workspaceActiveTabKey}
-				auxiliaryTabOrder={auxiliaryTabOrder}
-				onAuxiliaryTabOrderChange={onAuxiliaryTabOrderChange}
+				auxiliaryTabOrder={[...(auxiliaryTabOrder ?? []), ...sideChats.sides.map((side) => `side:${side.id}`)]}
+				onAuxiliaryTabOrderChange={onAuxiliaryTabOrderChange
+					? (keys) => onAuxiliaryTabOrderChange(keys.filter((key) => !key.startsWith("side:")))
+					: undefined}
 				controllerTransitioning={controllerTransitioning}
 				hasOlder={hasOlder}
 				loadingOlder={isLoadingOlder}
 				onLoadOlder={loadOlder}
 				busy={commands.busy}
-				onSend={(text, attachments, clientMessageId) =>
-					commands.send({ text, attachments, clientMessageId })}
+				onSend={async (text, attachments, clientMessageId, excerpts) => {
+					const btw = /^\/btw(?:\s+|$)/i.exec(text);
+					const message = btw ? text.slice(btw[0].length).trim() : text;
+					if (btw) {
+						const side = await sideChats.create(excerpts?.[0]);
+						onSideOpened?.();
+						if (message) {
+							await sideChats.replaceDraft(side.id, { version: 1, text: message, attachments: [], references: excerpts ?? [] });
+							await sideChats.send(side.id, message, attachments, excerpts);
+						}
+						return;
+					}
+					return commands.send({
+						text: message,
+						attachments,
+						clientMessageId,
+						excerpts: excerpts?.map((excerpt) => ({
+							conversationId: excerpt.conversationId,
+							messageId: excerpt.messageId,
+							revision: excerpt.revision,
+							text: excerpt.text,
+						})),
+					});
+				}}
 				commandError={commands.error}
 				onDecide={commands.resolve}
 				onResolveInput={commands.resolveInput}
@@ -532,32 +582,43 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 				onOpenShell={onOpenShell}
 				openingShell={openingShell}
 				shellError={shellError}
-				models={models}
-				onChooseSettings={hasProviderMode ? undefined : commands.chooseSettings}
+				models={sideChatActive ? [] : models}
+				onChooseSettings={sideChatActive || hasProviderMode ? undefined : commands.chooseSettings}
 				onRememberPermissions={can(renderSnapshot, "config_options") && !configOptions.loaded
 					? undefined : projectPermissions.remember}
 				rememberPermissionsPending={projectPermissions.pending}
 				rememberPermissionsError={projectPermissions.error}
 				rememberedPermissionMode={projectPermissions.savedMode}
-				configOptions={configOptions.options}
-				onChooseConfigOption={configOptions.setOption}
+				configOptions={sideChatActive ? [] : configOptions.options}
+				onChooseConfigOption={sideChatActive ? undefined : configOptions.setOption}
 				configOptionPending={configOptions.pending || commands.choosingSettings}
 				configOptionError={configOptions.error}
-				onCompact={commands.compact}
+				onCompact={sideChatActive ? undefined : commands.compact}
 				compacting={commands.compacting}
 				compactUnavailable={commands.compactUnavailable}
-				onRollback={commands.rollback}
+				onRollback={sideChatActive ? undefined : commands.rollback}
 				rollbackPending={commands.rollbackPending}
 				rollbackError={commands.rollbackError}
 				onOpenFiles={onOpenFiles}
 				onOpenFile={onOpenFile}
 				retryControl={commands.retryControl}
-				onEditMessage={commands.editMessage}
+				onEditMessage={sideChatActive ? undefined : commands.editMessage}
 				editMessagePending={commands.editMessagePending}
 				editMessageError={commands.editMessageError}
 				onActivateBranch={commands.activateBranch}
 				activateBranchPending={commands.activateBranchPending}
 				activateBranchError={commands.activateBranchError}
+				onCreateSideChat={async (excerpt) => {
+					const side = await sideChats.create(excerpt);
+					onSideOpened?.();
+					return side;
+				}}
+				onBtwAction={async (draft) => {
+					const side = await sideChats.create(draft?.references[0]);
+					if (draft) await sideChats.replaceDraft(side.id, draft);
+					onSideOpened?.();
+				}}
+				createSideChatError={sideChats.error}
 				skills={skills}
 				filePaths={paths}
 				filePathsTruncated={truncated}
@@ -606,6 +667,8 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 					presentation={shownSwitchPresentation}
 				/>
 			) : null}
+		</div>
+		{inspectorOpen ? null : sideChats.panel}
 		</div>
 	);
 });
