@@ -1256,7 +1256,7 @@ func TestResumeImportsNativeHistoryBeforeTheChatControllerStarts(t *testing.T) {
 		}, now); err != nil {
 		t.Fatalf("UpsertActivity: %v", err)
 	}
-	if err := st.SettleTurn(context.Background(), existing.ID, "native-turn-1", domain.TurnStateCompleted, "", now); err != nil {
+	if err := st.SettleTurn(context.Background(), existing.ID, "native-turn-1", domain.TurnStateCompleted, "", domain.ErrorClassUnknown, now); err != nil {
 		t.Fatalf("SettleTurn: %v", err)
 	}
 
@@ -2231,7 +2231,7 @@ func TestInterfaceHandoffAOHighWaterFallbackMustStayInItsTurn(t *testing.T) {
 		t.Fatalf("settle assistant: %v", err)
 	}
 	if err := st.SettleTurn(
-		ctx, conversation.ID, "expected-provider-turn", domain.TurnStateCompleted, "", now,
+		ctx, conversation.ID, "expected-provider-turn", domain.TurnStateCompleted, "", domain.ErrorClassUnknown, now,
 	); err != nil {
 		t.Fatalf("settle turn: %v", err)
 	}
@@ -2314,7 +2314,7 @@ func TestInterfaceHandoffAOHighWaterAcceptsMappedReassignedTurn(t *testing.T) {
 		t.Fatalf("settle assistant: %v", err)
 	}
 	if err := st.SettleTurn(
-		ctx, conversation.ID, "expected-provider-turn", domain.TurnStateCompleted, "", now,
+		ctx, conversation.ID, "expected-provider-turn", domain.TurnStateCompleted, "", domain.ErrorClassUnknown, now,
 	); err != nil {
 		t.Fatalf("settle turn: %v", err)
 	}
@@ -2463,7 +2463,7 @@ func TestInterfaceHandoffRoundTripRetiresTrustedTerminalCheckpointAfterChatTurn(
 		t.Fatalf("settle Chat answer B: %v", err)
 	}
 	if err := st.SettleTurn(
-		ctx, conversation.ID, "provider-turn-b", domain.TurnStateCompleted, "", now,
+		ctx, conversation.ID, "provider-turn-b", domain.TurnStateCompleted, "", domain.ErrorClassUnknown, now,
 	); err != nil {
 		t.Fatalf("settle Chat turn B: %v", err)
 	}
@@ -2535,7 +2535,7 @@ func TestInterfaceHandoffDoesNotAnchorReplayCheckpointOnFailedTurn(t *testing.T)
 		t.Fatalf("SettleAssistantMessage settled: %v", err)
 	}
 	if err := st.SettleTurn(context.Background(), existing.ID, "native-turn-1",
-		domain.TurnStateCompleted, "", now); err != nil {
+		domain.TurnStateCompleted, "", domain.ErrorClassUnknown, now); err != nil {
 		t.Fatalf("SettleTurn settled: %v", err)
 	}
 	// A newer failed Chat turn. Its synthetic auth-error answer lives on a dead
@@ -2559,7 +2559,7 @@ func TestInterfaceHandoffDoesNotAnchorReplayCheckpointOnFailedTurn(t *testing.T)
 		t.Fatalf("SettleAssistantMessage failed turn: %v", err)
 	}
 	if err := st.SettleTurn(context.Background(), existing.ID, "native-turn-2",
-		domain.TurnStateFailed, "authentication_failed", later); err != nil {
+		domain.TurnStateFailed, "authentication_failed", domain.ErrorClassPermanent, later); err != nil {
 		t.Fatalf("SettleTurn failed turn: %v", err)
 	}
 
@@ -2690,7 +2690,7 @@ func TestInterfaceHandoffDoesNotAnchorReplayBeforeProviderCoordinationBoundary(t
 		t.Fatalf("SettleAssistantMessage old provider: %v", err)
 	}
 	if err := st.SettleTurn(context.Background(), existing.ID, "old-provider-turn-id",
-		domain.TurnStateCompleted, "", now); err != nil {
+		domain.TurnStateCompleted, "", domain.ErrorClassUnknown, now); err != nil {
 		t.Fatalf("SettleTurn old provider: %v", err)
 	}
 
@@ -2710,7 +2710,7 @@ func TestInterfaceHandoffDoesNotAnchorReplayBeforeProviderCoordinationBoundary(t
 		t.Fatalf("BindTurnToProvider coordination: %v", err)
 	}
 	if err := st.SettleTurn(context.Background(), existing.ID, "new-provider-boundary",
-		domain.TurnStateFailed, "unsupported model", boundaryAt); err != nil {
+		domain.TurnStateFailed, "unsupported model", domain.ErrorClassPermanent, boundaryAt); err != nil {
 		t.Fatalf("SettleTurn coordination: %v", err)
 	}
 
@@ -4186,6 +4186,56 @@ func TestProviderEventsAreArchived(t *testing.T) {
 	}
 }
 
+// The archive exists to reconstruct what a wrong projection could not tell you,
+// so a field that only ever lived in memory leaves the row unable to explain a
+// failed turn. A completed turn must not grow the field: there is no failure to
+// classify, and an empty string would read as a real class.
+func TestArchivedEventKeepsTurnErrorClass(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+
+	if _, err := h.svc.Send(ctx, testSession, ports.ChatUserMessage{Text: "go", ClientMessageID: "c1"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	h.conv.emit(
+		ports.ChatEvent{Kind: ports.ChatEventTurnStarted, ProviderTurnID: "provider-turn-1"},
+		ports.ChatEvent{
+			Kind: ports.ChatEventTurnCompleted, ProviderTurnID: "provider-turn-1",
+			TurnState: domain.TurnStateFailed, ErrorClass: domain.ErrorClassTransient,
+		},
+	)
+	h.awaitSnapshot(t, func(s store.ConversationSnapshot) bool {
+		return len(s.Turns) == 1 && s.Turns[0].State.Terminal()
+	})
+
+	events, err := h.st.ProviderEventsSince(ctx, h.ctrl.ConversationID(), 0, 100)
+	if err != nil {
+		t.Fatalf("read archive: %v", err)
+	}
+	var classified, unclassified int
+	for _, event := range events {
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(event.PayloadJson), &payload); err != nil {
+			t.Fatalf("archived payload is not JSON: %v", err)
+		}
+		switch event.Method {
+		case string(ports.ChatEventTurnCompleted):
+			if payload["errorClass"] != string(domain.ErrorClassTransient) {
+				t.Fatalf("archived errorClass = %v, want %q", payload["errorClass"], domain.ErrorClassTransient)
+			}
+			classified++
+		case string(ports.ChatEventTurnStarted):
+			if _, ok := payload["errorClass"]; ok {
+				t.Fatalf("turn start archived an empty errorClass: %v", payload["errorClass"])
+			}
+			unclassified++
+		}
+	}
+	if classified != 1 || unclassified != 1 {
+		t.Fatalf("classified %d and unclassified %d events, want 1 of each", classified, unclassified)
+	}
+}
+
 /* ---- the send queue ---------------------------------------------------- */
 
 // turnStateByText is how the queue tests read the timeline: a turn matters here
@@ -4206,6 +4256,29 @@ func turnStateByText(t *testing.T, s store.ConversationSnapshot) map[string]doma
 		}
 	}
 	return states
+}
+
+// turnByText returns the turn that carried the given user message. Turn state is
+// keyed by prompt text throughout these tests, so the durable turn itself is
+// looked up the same way.
+func turnByText(t *testing.T, s store.ConversationSnapshot, text string) domain.ConversationTurn {
+	t.Helper()
+	turns := map[string]domain.ConversationTurn{}
+	for _, turn := range s.Turns {
+		turns[turn.ID] = turn
+	}
+	for _, msg := range s.Messages {
+		if msg.Role != domain.MessageRoleUser {
+			continue
+		}
+		if msg.Text == text {
+			if turn, ok := turns[msg.TurnID]; ok {
+				return turn
+			}
+		}
+	}
+	t.Fatalf("no turn found for user message %q", text)
+	return domain.ConversationTurn{}
 }
 
 // The composer tells the user a mid-turn message is queued until the agent

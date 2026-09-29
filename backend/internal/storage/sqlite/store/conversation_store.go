@@ -1168,11 +1168,18 @@ func (s *Store) BindTurnToProvider(ctx context.Context, turnID, providerTurnID s
 
 // SettleTurn records a turn's terminal state. An interrupted turn is not an
 // error and carries no message.
+//
+// errorClass records what AO concluded about a failure's cause. It is stored only
+// for a failed turn: a success or user interrupt has no cause to classify. A
+// failure AO could not classify is stored as unknown, and a class nothing
+// recognizes degrades to ambiguous, so an unreadable error is never stored as
+// proof that the agent's work did not run.
 func (s *Store) SettleTurn(
 	ctx context.Context,
 	conversationID, providerTurnID string,
 	state domain.TurnState,
 	errMessage string,
+	errorClass domain.ErrorClass,
 	now time.Time,
 ) error {
 	q, unlock := s.conversationWriter(ctx)
@@ -1195,6 +1202,7 @@ func (s *Store) SettleTurn(
 	if err := q.SettleConversationTurn(ctx, gen.SettleConversationTurnParams{
 		State:        state,
 		ErrorMessage: errMessage,
+		ErrorClass:   string(turnErrorClass(state, errorClass)),
 		CompletedAt:  sql.NullTime{Time: now, Valid: true},
 		ID:           turn.ID,
 	}); err != nil {
@@ -2091,6 +2099,7 @@ func (s *Store) SettleTurnByID(
 	turnID string,
 	state domain.TurnState,
 	errMessage string,
+	errorClass domain.ErrorClass,
 	now time.Time,
 ) error {
 	s.writeMu.Lock()
@@ -2098,12 +2107,30 @@ func (s *Store) SettleTurnByID(
 	if err := s.qw.SettleConversationTurn(ctx, gen.SettleConversationTurnParams{
 		State:        state,
 		ErrorMessage: errMessage,
+		ErrorClass:   string(turnErrorClass(state, errorClass)),
 		CompletedAt:  sql.NullTime{Time: now, Valid: true},
 		ID:           turnID,
 	}); err != nil {
 		return fmt.Errorf("settle turn %s: %w", turnID, err)
 	}
 	return nil
+}
+
+// turnErrorClass normalizes what is stored for a settled turn. A turn that did
+// not fail has no cause to classify, so it stores nothing. A failure whose cause
+// the adapter could not establish is ambiguous by default: an unreadable error is
+// not evidence that the agent's work did not run.
+func turnErrorClass(state domain.TurnState, class domain.ErrorClass) domain.ErrorClass {
+	if state != domain.TurnStateFailed {
+		return ""
+	}
+	switch class {
+	case domain.ErrorClassAmbiguous, domain.ErrorClassTransient,
+		domain.ErrorClassPermanent, domain.ErrorClassUnknown:
+		return class
+	default:
+		return domain.ErrorClassAmbiguous
+	}
 }
 
 // AppendAssistantDelta folds a streaming delta into its message, creating the
@@ -3274,6 +3301,7 @@ func turnToDomain(row gen.ConversationTurn) domain.ConversationTurn {
 		ProviderTurnID:     row.ProviderTurnID,
 		State:              row.State,
 		ErrorMessage:       row.ErrorMessage,
+		ErrorClass:         domain.ErrorClass(row.ErrorClass),
 		RequestedAt:        row.RequestedAt,
 	}
 	if row.RetryOfTurnID.Valid {

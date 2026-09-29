@@ -395,7 +395,7 @@ func (c *conversation) finishHistoryTurn(state domain.TurnState) {
 	turnID := c.history.turnID
 	c.historyMu.Unlock()
 
-	c.settleOpenItems(turnID, state)
+	c.settleOpenItems(turnID, state, domain.ErrorClassUnknown)
 	if state != "" {
 		c.emit(ports.ChatEvent{
 			Kind:           ports.ChatEventTurnCompleted,

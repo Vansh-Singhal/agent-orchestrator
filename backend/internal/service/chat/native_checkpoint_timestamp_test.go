@@ -88,7 +88,7 @@ func TestNativeReplayDoesNotSupersedeNewHooksWithRepeatedText(t *testing.T) {
 				if i == len(prompts)-1 && tc.lastTurnState != "" {
 					state = tc.lastTurnState
 				}
-				if err := st.SettleTurn(ctx, conversation.ID, id, state, "", at.Add(10*time.Second)); err != nil {
+				if err := st.SettleTurn(ctx, conversation.ID, id, state, "", domain.ErrorClassUnknown, at.Add(10*time.Second)); err != nil {
 					t.Fatal(err)
 				}
 				events = append(events,

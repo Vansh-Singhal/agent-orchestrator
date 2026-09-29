@@ -244,7 +244,7 @@ func TestRetryTurnRejectsInvalidDurableContentClearly(t *testing.T) {
 			if err := h.st.BindTurnToProvider(ctx, "invalid-content-turn", "provider-invalid-content", h.now()); err != nil {
 				t.Fatalf("BindTurnToProvider: %v", err)
 			}
-			if err := h.st.SettleTurnByID(ctx, "invalid-content-turn", domain.TurnStateFailed, "source failed", h.now()); err != nil {
+			if err := h.st.SettleTurnByID(ctx, "invalid-content-turn", domain.TurnStateFailed, "source failed", domain.ErrorClassPermanent, h.now()); err != nil {
 				t.Fatalf("SettleTurnByID: %v", err)
 			}
 

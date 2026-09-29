@@ -599,7 +599,6 @@ func (c *conversation) finishPrompt(
 	interrupt := c.interrupt
 	isCompaction := c.compactingTurnID != "" && c.compactingTurnID == turnID
 	c.mu.Unlock()
-	c.settleOpenItems(turnID)
 	interruptedLocally := false
 	if interrupt != nil && interrupt.turnID == turnID {
 		// ACP cancellation and Prompt completion can race. Wait for the sender's
@@ -617,12 +616,20 @@ func (c *conversation) finishPrompt(
 	}
 	var state domain.TurnState
 	var turnErr error
+	var errorClass domain.ErrorClass
 	if err != nil {
 		if interruptedLocally || errors.Is(err, context.Canceled) {
 			state = domain.TurnStateInterrupted
 		} else {
 			state = domain.TurnStateFailed
 			turnErr = normalizeACPError("ACP session/prompt", err)
+			errorClass = classifyACPError(err)
+			if errorClass == domain.ErrorClassUnknown {
+				// An unclassified failure is ambiguous, never permanent: AO must
+				// not infer that the agent's work did not run from an error it
+				// could not read (issue #5967).
+				errorClass = domain.ErrorClassAmbiguous
+			}
 		}
 	} else {
 		state = turnState(resp.StopReason)
@@ -630,6 +637,9 @@ func (c *conversation) finishPrompt(
 			if failure := c.promptResponseFailure(resp); failure != nil {
 				state = domain.TurnStateFailed
 				turnErr = failure
+				// A provider that reported a structured failure without saying
+				// whether it ran leaves the outcome unknown.
+				errorClass = domain.ErrorClassAmbiguous
 			}
 		}
 		if resp.Usage != nil {
@@ -671,12 +681,17 @@ func (c *conversation) finishPrompt(
 			c.mu.Unlock()
 		}
 	}
+	// Settle buffered items only now that the turn's outcome is known. Settling
+	// before classification is what let a timed-out turn record its in-flight
+	// tool calls as provider-reported failures.
+	c.settleOpenItems(turnID, state, errorClass)
 	c.mu.Lock()
 	c.terminalEventID = eventID
 	c.mu.Unlock()
 	c.emit(ports.ChatEvent{
 		Kind: ports.ChatEventTurnCompleted, ProviderEventID: eventID,
 		ProviderTurnID: turnID, TurnState: state, Err: turnErr,
+		ErrorClass: errorClass,
 	})
 
 	c.mu.Lock()
@@ -1033,14 +1048,24 @@ func (c *conversation) emit(event ports.ChatEvent) {
 	}
 }
 
-func (c *conversation) settleOpenItems(turnID string, turnState ...domain.TurnState) {
+// settleOpenItems closes the turn's still-buffered items so the conversation
+// does not keep showing a turn as running after it is terminal.
+//
+// turnState and errorClass let it distinguish a provider-reported failure from
+// a turn that ended while work was still in flight. An item that was pending or
+// in progress when the turn ended was never reported as failed by the provider:
+// recording it as failed would claim "this did not happen" about a tool call that
+// may have committed, pushed, or written a file before the response was lost
+// (issue #5967). Such an item is recorded with its real observed status instead,
+// so a later consumer can see the work is unconfirmed rather than disproven.
+func (c *conversation) settleOpenItems(turnID string, turnState domain.TurnState, errorClass domain.ErrorClass) {
 	c.mu.Lock()
 	messages := c.messages
 	thoughts := c.thoughts
 	nestedMessages := c.nestedMessages
 	tools := c.tools
 	c.mu.Unlock()
-	recovered := len(turnState) > 0 && turnState[0] == domain.TurnStateRecovered
+	recovered := turnState == domain.TurnStateRecovered
 	activityStatus := domain.ActivityStatusCompleted
 	if recovered {
 		activityStatus = domain.ActivityStatusRecovered
@@ -1066,18 +1091,56 @@ func (c *conversation) settleOpenItems(turnID string, turnState ...domain.TurnSt
 			ActivityStatus: activityStatus, Summary: "Subagent response",
 			Text: item.text, Detail: detail})
 	}
+	// An interrupted turn is a deliberate stop, so work that had not reported a
+	// terminal status by then genuinely did not complete. An ambiguous or
+	// unclassified failure is not: the provider accepted the request and the
+	// outcome was lost, so its in-flight items stay unconfirmed.
+	forceFailed := turnState == domain.TurnStateInterrupted || turnState == domain.TurnStateCancelled
 	toolIDs := sortedKeys(tools)
 	for _, id := range toolIDs {
 		tool := tools[id]
-		if tool.status == acpsdk.ToolCallStatusPending || tool.status == acpsdk.ToolCallStatusInProgress || tool.status == "" {
-			snapshot := *tool
-			snapshot.status = acpsdk.ToolCallStatusFailed
-			event := c.toolEvent(turnID, &snapshot, true)
-			if recovered {
-				event.ActivityStatus = domain.ActivityStatusRecovered
-			}
-			c.emit(event)
+		if toolTerminal(tool.status) {
+			continue
 		}
+		snapshot := *tool
+		if forceFailed {
+			snapshot.status = acpsdk.ToolCallStatusFailed
+		}
+		event := c.toolEvent(turnID, &snapshot, true)
+		if recovered {
+			event.ActivityStatus = domain.ActivityStatusRecovered
+		}
+		// A failed turn lost its outcome, a recovered one never established one,
+		// and a completed turn did establish one the tool never reported. In all
+		// three the tool's own terminal status is missing, so the timeline says
+		// that instead of implying the call did nothing or failed.
+		if !forceFailed && (turnState == domain.TurnStateFailed ||
+			turnState == domain.TurnStateCompleted || recovered) {
+			// A completed turn's outcome is known, so the tool is the only unknown
+			// and must never be described as an unconfirmed outcome. A class
+			// riding along must not change that.
+			class := errorClass
+			if turnState == domain.TurnStateCompleted {
+				class = ""
+			}
+			event.Summary = unsettledToolSummary(event.Summary, class)
+		}
+		c.emit(event)
+	}
+}
+
+// unsettledToolSummary marks an activity that the turn ended with unconfirmed.
+// It reports what AO knows, not what it guessed: the tool's own reported
+// outcome was never received.
+func unsettledToolSummary(summary string, errorClass domain.ErrorClass) string {
+	if summary == "" {
+		summary = "Agent tool"
+	}
+	switch errorClass {
+	case domain.ErrorClassAmbiguous, domain.ErrorClassUnknown:
+		return summary + " (outcome unconfirmed)"
+	default:
+		return summary + " (did not complete)"
 	}
 }
 

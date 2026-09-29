@@ -1322,6 +1322,64 @@ func TestResolveChatTargetActivationOutcomeRejectsIncompleteOwnershipTuples(t *t
 	}
 }
 
+// A chat turn that failed parks the session in waiting_input (issue #5967),
+// which is exactly when a user switches harnesses to escape a broken provider.
+// Demanding idle made that switch unresolvable, so the fix for a dead turn also
+// removed the user's ability to recover from it.
+func TestResolveChatTargetActivationOutcomeCommitsAfterFailedTurn(t *testing.T) {
+	manager, store, _ := newSwitchTestManager(t, &fakeRestartRuntime{fakeRuntime: &fakeRuntime{}})
+	activation := domain.AgentSwitchChatTargetActivation{
+		SwitchID: "switch-1", SessionID: "proj-1", SourceHarness: domain.HarnessClaudeCode,
+		SourceGenerationID: "source-generation", ExpectedSourceControllerGeneration: "source-generation",
+		TargetHarness: domain.HarnessCodex, TargetNativeSessionRef: "target-native",
+		TargetGenerationID: "target-generation", ProviderConversationID: "target-provider",
+		ControllerGeneration: "target-generation", ActivatedAt: time.Now().UTC(),
+	}
+	store.switches[activation.SwitchID] = domain.AgentSwitch{
+		ID: activation.SwitchID, SessionID: activation.SessionID, State: domain.AgentSwitchTargetReady,
+		FromHarness: activation.SourceHarness, TargetHarness: activation.TargetHarness,
+		SourceGenerationID: activation.SourceGenerationID, TargetGenerationID: activation.TargetGenerationID,
+		TargetNativeSessionRef: nativeSessionIDPtr(activation.TargetNativeSessionRef),
+	}
+	rec := store.sessions[activation.SessionID]
+	rec.Mode = domain.SessionModeChat
+	rec.Harness = activation.TargetHarness
+	rec.Metadata.ProviderConversationID = activation.ProviderConversationID
+	rec.Metadata.ControllerGeneration = activation.ControllerGeneration
+	rec.Metadata.AgentSessionID = activation.ProviderConversationID
+	store.sessions[rec.ID] = rec
+	store.native[activation.TargetNativeSessionRef] = domain.AgentNativeSession{
+		ID: activation.TargetNativeSessionRef, AOSessionID: activation.SessionID,
+		Harness: activation.TargetHarness, NativeSessionID: activation.ProviderConversationID,
+		LastGenerationID: activation.TargetGenerationID,
+	}
+	boundaryID := chatSwitchProviderBoundaryID(activation.SwitchID)
+	store.conversations[activation.SessionID] = domain.ConversationRecord{
+		ID: "conversation-1", SessionID: activation.SessionID, ActiveBranchID: boundaryID,
+	}
+	store.branches[boundaryID] = domain.ConversationBranch{
+		ID: boundaryID, ConversationID: "conversation-1", SessionID: activation.SessionID,
+		ProviderConversationID: activation.ProviderConversationID,
+		ProviderScopeID:        boundaryID, Active: true,
+	}
+
+	rec.Activity = domain.Activity{State: domain.ActivityWaitingInput, LastActivityAt: activation.ActivatedAt}
+	store.sessions[rec.ID] = rec
+	_, committed, sourceStillOwns, err := manager.resolveChatTargetActivationOutcome(context.Background(), store, domain.SessionRecord{}, activation)
+	if err != nil || !committed || sourceStillOwns {
+		t.Fatalf("switch after a failed turn resolved = committed %v sourceStillOwns %v err %v, want committed", committed, sourceStillOwns, err)
+	}
+
+	// The relaxation must not extend to work that is genuinely in flight, which
+	// would let a switch race a live turn.
+	rec.Activity = domain.Activity{State: domain.ActivityActive, LastActivityAt: activation.ActivatedAt}
+	store.sessions[rec.ID] = rec
+	_, committed, sourceStillOwns, err = manager.resolveChatTargetActivationOutcome(context.Background(), store, domain.SessionRecord{}, activation)
+	if err != nil || committed || sourceStillOwns {
+		t.Fatalf("switch during an active turn resolved = committed %v sourceStillOwns %v err %v, want neither", committed, sourceStillOwns, err)
+	}
+}
+
 func TestSwitchAgentChatSwitchBackResumesVerifiedNativeConversation(t *testing.T) {
 	manager, store, _ := newSwitchTestManager(t, &fakeRestartRuntime{fakeRuntime: &fakeRuntime{}})
 	rec := store.sessions["proj-1"]

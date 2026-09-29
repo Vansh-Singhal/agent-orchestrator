@@ -210,7 +210,7 @@ func seedRecoveryCheckpointHistory(t *testing.T, st *sqlite.Store, state domain.
 		"Earlier answer", "prior-answer", now.Add(-time.Minute)); err != nil {
 		t.Fatalf("record prior answer: %v", err)
 	}
-	if err := st.SettleTurn(ctx, conversation.ID, "prior-provider-turn", domain.TurnStateCompleted, "", now.Add(-time.Minute)); err != nil {
+	if err := st.SettleTurn(ctx, conversation.ID, "prior-provider-turn", domain.TurnStateCompleted, "", domain.ErrorClassUnknown, now.Add(-time.Minute)); err != nil {
 		t.Fatalf("complete prior turn: %v", err)
 	}
 	created, err = st.AppendUserMessage(ctx, conversation.ID, testSession, "chat-generation",
@@ -227,7 +227,7 @@ func seedRecoveryCheckpointHistory(t *testing.T, st *sqlite.Store, state domain.
 		if err := st.BindTurnToProvider(ctx, "unsettled-turn", "unsettled-provider-turn", now); err != nil {
 			t.Fatalf("bind unsettled turn: %v", err)
 		}
-		if err := st.SettleTurn(ctx, conversation.ID, "unsettled-provider-turn", state, "", now.Add(time.Second)); err != nil {
+		if err := st.SettleTurn(ctx, conversation.ID, "unsettled-provider-turn", state, "", domain.ErrorClassUnknown, now.Add(time.Second)); err != nil {
 			t.Fatalf("settle unfinished turn: %v", err)
 		}
 	}

@@ -1017,6 +1017,12 @@ type ChatEvent struct {
 	// Err carries display text and optional typed causes. Its presence does not
 	// imply the conversation is over; check Kind and ControllerState.
 	Err error
+	// ErrorClass is what the adapter knows about a failed turn's cause, and in
+	// particular whether the agent's work may already have landed. It is set
+	// only on terminal failure events. An adapter that cannot classify a
+	// failure must leave it empty rather than assert a cause; callers treat an
+	// empty class as unknown, never as proof the work did not run (issue #5967).
+	ErrorClass domain.ErrorClass
 }
 
 // ChatDriver opens conversations for one harness.

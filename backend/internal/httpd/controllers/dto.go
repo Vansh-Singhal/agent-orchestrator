@@ -2245,11 +2245,17 @@ type ConversationTurnResponse struct {
 	// RetryOfTurnID is the failed source whose durable prompt created this turn.
 	RetryOfTurnID string `json:"retryOfTurnId,omitempty"`
 	// HasRetryAttempt remains true when the attempt is outside the active branch.
-	HasRetryAttempt bool    `json:"hasRetryAttempt,omitempty"`
-	ErrorMessage    string  `json:"errorMessage,omitempty"`
-	RequestedAt     string  `json:"requestedAt"`
-	StartedAt       *string `json:"startedAt,omitempty"`
-	CompletedAt     *string `json:"completedAt,omitempty"`
+	HasRetryAttempt bool `json:"hasRetryAttempt,omitempty"`
+	ErrorMessage    string `json:"errorMessage,omitempty"`
+	// ErrorClass says what AO knows about a failure's cause, and specifically
+	// whether the agent's work may already have landed. "ambiguous" means the
+	// request was accepted but the outcome was never reported, so a client must
+	// not offer a plain repeat that could run the work twice. Absent when the
+	// turn did not fail.
+	ErrorClass  string  `json:"errorClass,omitempty" enum:"unknown,ambiguous,transient,permanent"`
+	RequestedAt string  `json:"requestedAt"`
+	StartedAt   *string `json:"startedAt,omitempty"`
+	CompletedAt *string `json:"completedAt,omitempty"`
 	// RolledBack marks a turn an undo discarded. Its messages and activities are
 	// absent from this snapshot because the agent no longer remembers them; the turn
 	// is still reported so a client can say what was taken back rather than letting

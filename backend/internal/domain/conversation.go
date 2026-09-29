@@ -531,10 +531,16 @@ type ConversationTurn struct {
 	HasRetryAttempt bool      `json:"hasRetryAttempt,omitempty"`
 	State           TurnState `json:"state"`
 	// ErrorMessage is set for failed turns. Interrupted turns are not errors.
-	ErrorMessage string     `json:"errorMessage,omitempty"`
-	RequestedAt  time.Time  `json:"requestedAt"`
-	StartedAt    *time.Time `json:"startedAt,omitempty"`
-	CompletedAt  *time.Time `json:"completedAt,omitempty"`
+	ErrorMessage string `json:"errorMessage,omitempty"`
+	// ErrorClass records what AO concluded about a failure's cause. It is empty
+	// for a successful or interrupted turn. A failure AO could not classify is
+	// "ambiguous", not "permanent": an unreadable error is not evidence that the
+	// agent's work did not run, so a client must not offer a retry as if it were
+	// safe to repeat the work.
+	ErrorClass ErrorClass `json:"errorClass,omitempty"`
+	RequestedAt time.Time  `json:"requestedAt"`
+	StartedAt   *time.Time `json:"startedAt,omitempty"`
+	CompletedAt *time.Time `json:"completedAt,omitempty"`
 	// RolledBackAt is set when a rollback discarded this turn provider-side. The
 	// row survives because AO does not destroy durable facts, but the agent no
 	// longer remembers the exchange, so its messages and activities are left out

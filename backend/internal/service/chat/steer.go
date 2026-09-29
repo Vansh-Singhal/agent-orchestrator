@@ -229,7 +229,8 @@ func (c *Controller) PromoteQueuedTurn(
 		// survive that cancellation or the source remains visibly queued forever.
 		settleCtx := context.WithoutCancel(ctx)
 		if settleErr := c.store.SettleTurnByID(
-			settleCtx, turnID, domain.TurnStateFailed, ErrPromotionUncertain.Error(), c.now()); settleErr != nil {
+			settleCtx, turnID, domain.TurnStateFailed, ErrPromotionUncertain.Error(),
+			domain.ErrorClassAmbiguous, c.now()); settleErr != nil {
 			c.log.Error("failed to settle uncertain queued turn promotion",
 				"turn", turnID, "cause", cause, "error", settleErr)
 		}

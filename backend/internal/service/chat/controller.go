@@ -72,8 +72,8 @@ type Store interface {
 	AppendRetryUserMessage(ctx context.Context, conversationID string, session domain.SessionID, generation string, msg domain.ConversationMessage, turnID, retryOfTurnID string, now time.Time) (bool, error)
 	AppendReviewRetryUserMessage(ctx context.Context, conversationID string, session domain.SessionID, reviewID, generation string, msg domain.ConversationMessage, turnID, retryOfTurnID string, now time.Time) (bool, error)
 	BindTurnToProvider(ctx context.Context, turnID, providerTurnID string, now time.Time) error
-	SettleTurn(ctx context.Context, conversationID, providerTurnID string, state domain.TurnState, errMessage string, now time.Time) error
-	SettleTurnByID(ctx context.Context, turnID string, state domain.TurnState, errMessage string, now time.Time) error
+	SettleTurn(ctx context.Context, conversationID, providerTurnID string, state domain.TurnState, errMessage string, errorClass domain.ErrorClass, now time.Time) error
+	SettleTurnByID(ctx context.Context, turnID string, state domain.TurnState, errMessage string, errorClass domain.ErrorClass, now time.Time) error
 	SettleOrphanedTurns(ctx context.Context, session domain.SessionID, now time.Time) error
 	CleanupOwnedControllerWork(ctx context.Context, session domain.SessionID, conversationID, generation string, now time.Time) (bool, error)
 	ListVisibleRunningTurnProviderIDs(ctx context.Context, conversationID string) ([]string, error)
@@ -1677,13 +1677,15 @@ func (c *Controller) dispatch(
 		}
 		c.mu.Unlock()
 		// The provider may or may not have accepted it. Settle the turn as failed
-		// rather than retrying: a duplicate turn would run the work twice. Settling
-		// by AO's own turn id is required here — an undispatched turn has no
-		// provider id, so looking one up by the empty string would hit whichever
-		// undispatched turn the database returned first.
+		// rather than retrying: a duplicate turn would run the work twice. The
+		// outcome is genuinely unknown, so the class records that instead of
+		// claiming the work never ran. Settling by AO's own turn id is required
+		// here — an undispatched turn has no provider id, so looking one up by
+		// the empty string would hit whichever undispatched turn the database
+		// returned first.
 		completedAt := c.now()
 		if settleErr := c.store.SettleTurnByID(
-			ctx, turnID, domain.TurnStateFailed, err.Error(), completedAt); settleErr != nil {
+			ctx, turnID, domain.TurnStateFailed, err.Error(), dispatchFailureClass, completedAt); settleErr != nil {
 			c.log.Error("failed to settle turn after send error", "error", settleErr)
 		}
 		return domain.ConversationTurn{
@@ -1729,7 +1731,7 @@ func (c *Controller) dispatch(
 			c.pendingTurnID = ""
 			c.mu.Unlock()
 			if settleErr := c.store.SettleTurnByID(
-				ctx, turnID, domain.TurnStateFailed, err.Error(), c.now()); settleErr != nil {
+				ctx, turnID, domain.TurnStateFailed, err.Error(), dispatchFailureClass, c.now()); settleErr != nil {
 				c.log.Error("failed to settle turn after deferred start error", "error", settleErr)
 			}
 			return domain.ConversationTurn{}, fmt.Errorf("start turn: %w", err)
@@ -1805,7 +1807,7 @@ func (c *Controller) drainLocked(ctx context.Context, allowDispatch bool) {
 	if queued.DeliveryContentJSON != "" {
 		if err := json.Unmarshal([]byte(queued.DeliveryContentJSON), &content); err != nil {
 			_ = c.store.SettleTurnByID(ctx, queued.TurnID, domain.TurnStateFailed,
-				"queued chat content is corrupt", c.now())
+				"queued chat content is corrupt", domain.ErrorClassPermanent, c.now())
 			c.log.Error("failed to decode queued chat content",
 				"session", c.sessionID, "turn", queued.TurnID, "error", err)
 			return
@@ -2262,7 +2264,7 @@ func (c *Controller) reconcileDurableTurnsLocked(
 	}
 	for _, providerTurnID := range providerTurnIDs {
 		if err := c.store.SettleTurn(ctx, c.conversation.ID, providerTurnID,
-			domain.TurnStateInterrupted, "", now); err != nil {
+			domain.TurnStateInterrupted, "", domain.ErrorClassUnknown, now); err != nil {
 			return fmt.Errorf("reconcile durable turn %s: %w", providerTurnID, err)
 		}
 	}
@@ -2624,6 +2626,9 @@ func (c *Controller) projectEvent(ctx context.Context, event ports.ChatEvent) (b
 		}
 	}
 	record["diff"] = event.Diff
+	if event.ErrorClass != "" {
+		record["errorClass"] = event.ErrorClass
+	}
 	if event.Input != nil {
 		record["input"] = event.Input
 	}
@@ -2738,7 +2743,8 @@ func (c *Controller) apply(ctx context.Context, event ports.ChatEvent) error {
 		}
 		state := settledTurnState(event)
 		if err := c.store.SettleTurn(
-			ctx, c.conversation.ID, event.ProviderTurnID, state, message, now); err != nil {
+			ctx, c.conversation.ID, event.ProviderTurnID, state, message,
+			event.ErrorClass, now); err != nil {
 			return err
 		}
 		if errors.Is(event.Err, ports.ErrChatAuthRequired) {
@@ -3109,9 +3115,27 @@ func (c *Controller) afterProject(ctx context.Context, event ports.ChatEvent, pr
 		}
 		activityState := domain.ActivityIdle
 		activityEvent := "chat.turn.completed"
-		if reauthRequired {
+		switch {
+		case reauthRequired:
 			activityState = domain.ActivityWaitingInput
 			activityEvent = "chat.account.reauth"
+		case settledTurnState(event) == domain.TurnStateFailed:
+			// A failed turn is not a completed one. Reporting it as idle under
+			// "chat.turn.completed" made a worker that died mid-turn
+			// indistinguishable from one that finished its work, so nothing
+			// surfaced the failure and queued work stayed frozen behind it
+			// (issue #5967). A turn whose outcome is unknown is the sharpest
+			// case: the agent's work may have landed, so it needs attention even
+			// though nothing is provably wrong.
+			//
+			// waiting_input, not blocked: blocked is reserved for an agent parked
+			// on a permission or approval dialog, where injecting input would
+			// answer the dialog for the user (see domain.ActivityState). A failed
+			// turn is merely paused on its human, so it must keep automated
+			// senders and the confirm nudge enabled. Both states still render as
+			// the needs_input session status.
+			activityState = domain.ActivityWaitingInput
+			activityEvent = "chat.turn.failed"
 		}
 		c.reportActivity(ctx, activityState, activityEvent, now)
 		// Only a completed turn releases queued work; a failed or recovered one holds
@@ -3168,6 +3192,11 @@ func settledTurnState(event ports.ChatEvent) domain.TurnState {
 	}
 	return event.TurnState
 }
+
+// dispatchFailureClass is the class for a turn AO could not hand to the provider.
+// The request may or may not have been accepted, so the outcome is unknown
+// rather than proven absent: a caller that re-sends it could run the work twice.
+const dispatchFailureClass = domain.ErrorClassAmbiguous
 
 func (c *Controller) reportInteractionResolved(ctx context.Context, event string, now time.Time) {
 	pending, err := c.store.HasPendingConversationInteractions(ctx, c.conversation.ID)

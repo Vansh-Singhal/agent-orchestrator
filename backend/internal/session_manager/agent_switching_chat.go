@@ -840,12 +840,16 @@ func (m *Manager) resolveChatTargetActivationOutcome(
 	}
 	targetRefMatches := current.TargetNativeSessionRef != nil &&
 		*current.TargetNativeSessionRef == activation.TargetNativeSessionRef
+	// Quiescent, not idle: a chat turn that failed parks the session in
+	// waiting_input (issue #5967), and switching harnesses is the natural
+	// recovery from a failing provider. Demanding idle made every such switch
+	// unresolvable, which would have hidden the failure's one real remedy.
 	committed := current.State == domain.AgentSwitchTargetReady &&
 		current.SourceGenerationID == activation.SourceGenerationID &&
 		current.TargetGenerationID == activation.TargetGenerationID && targetRefMatches &&
 		domain.NormalizeSessionMode(session.Mode) == domain.SessionModeChat &&
 		session.Harness == activation.TargetHarness &&
-		session.Activity.State == domain.ActivityIdle &&
+		session.Activity.State.IsQuiescent() &&
 		session.Metadata.ProviderConversationID == activation.ProviderConversationID &&
 		session.Metadata.ControllerGeneration == activation.ControllerGeneration
 	if committed {

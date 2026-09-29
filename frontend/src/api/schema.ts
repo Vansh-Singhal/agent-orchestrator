@@ -3448,6 +3448,8 @@ export interface components {
         ConversationTurnResponse: {
             completedAt?: null | string;
             diff?: components["schemas"]["ConversationTurnDiffResponse"];
+            /** @enum {string} */
+            errorClass?: "unknown" | "ambiguous" | "transient" | "permanent";
             errorMessage?: string;
             hasRetryAttempt?: boolean;
             id: string;

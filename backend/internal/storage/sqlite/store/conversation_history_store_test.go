@@ -583,7 +583,7 @@ func TestQueuedTurnPromotionReservationPreservesTheOtherQueueOrder(t *testing.T)
 	if next.TurnID != "queued-1" {
 		t.Fatalf("queue head = %q, want queued-1", next.TurnID)
 	}
-	if err := s.SettleTurnByID(ctx, "queued-1", domain.TurnStateCompleted, "", histClock); err != nil {
+	if err := s.SettleTurnByID(ctx, "queued-1", domain.TurnStateCompleted, "", domain.ErrorClassUnknown, histClock); err != nil {
 		t.Fatalf("remove queue head: %v", err)
 	}
 	next, err = s.NextQueuedTurn(ctx, conversation)
@@ -738,7 +738,7 @@ func seedTurn(t *testing.T, s *sqlite.Store, conversationID string, session doma
 		t.Fatalf("upsert activity for %s: %v", turnID, err)
 	}
 	if err := s.SettleTurn(ctx, conversationID, "provider-"+turnID,
-		domain.TurnStateCompleted, "", at); err != nil {
+		domain.TurnStateCompleted, "", domain.ErrorClassUnknown, at); err != nil {
 		t.Fatalf("settle %s: %v", turnID, err)
 	}
 }
@@ -762,7 +762,7 @@ func TestSettleTurnStopsStreamingAssistantMessages(t *testing.T) {
 		t.Fatalf("append assistant delta: %v", err)
 	}
 
-	if err := s.SettleTurn(ctx, conversation, providerTurnID, domain.TurnStateCompleted, "", histClock.Add(time.Minute)); err != nil {
+	if err := s.SettleTurn(ctx, conversation, providerTurnID, domain.TurnStateCompleted, "", domain.ErrorClassUnknown, histClock.Add(time.Minute)); err != nil {
 		t.Fatalf("settle turn: %v", err)
 	}
 	snapshot, err := s.LoadConversationSnapshot(ctx, conversation)

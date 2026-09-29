@@ -9962,6 +9962,13 @@ components:
           - string
         diff:
           $ref: '#/components/schemas/ConversationTurnDiffResponse'
+        errorClass:
+          enum:
+          - unknown
+          - ambiguous
+          - transient
+          - permanent
+          type: string
         errorMessage:
           type: string
         hasRetryAttempt:

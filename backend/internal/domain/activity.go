@@ -39,6 +39,16 @@ func (a ActivityState) NeedsInput() bool {
 	return a == ActivityWaitingInput || a == ActivityBlocked
 }
 
+// IsQuiescent reports whether the agent is not actively producing work: it is
+// idle, or it is paused on the user. Session-level flows that hand a session to
+// a different controller or harness (agent switch) must not require exactly
+// idle, because a paused session is safe to take over, but they must still
+// exclude active, whose work is genuinely in flight. Distinct from NeedsInput:
+// that asks who unblocks the session, this asks whether taking it over is safe.
+func (a ActivityState) IsQuiescent() bool {
+	return a == ActivityIdle || a.NeedsInput()
+}
+
 // Activity captures the persisted activity reading: the state and when it was
 // last observed.
 type Activity struct {

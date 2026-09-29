@@ -1834,6 +1834,11 @@ func (m *Manager) interruptTimedOutSourceHandoff(ctx context.Context, rec domain
 	// Give the provider a short, bounded opportunity to persist the turn as
 	// interrupted before Destroy removes its terminal. Without this boundary a
 	// resumed native session can finish and retry an already-stale handoff.
+	//
+	// Any quiescent state ends the wait, not just idle: a turn that failed leaves
+	// the session waiting_input (issue #5967), and that is precisely when a user
+	// is most likely to switch harnesses to recover. Requiring idle would burn
+	// the whole deadline for a session that has already settled its turn.
 	deadline := time.NewTimer(switchHandoffInterruptWait)
 	defer deadline.Stop()
 	ticker := time.NewTicker(interfaceTransitionPoll)
@@ -1846,7 +1851,7 @@ func (m *Manager) interruptTimedOutSourceHandoff(ctx context.Context, rec domain
 		if !found {
 			return ErrNotFound
 		}
-		if current.Activity.State == domain.ActivityIdle || current.Activity.State == domain.ActivityExited {
+		if current.Activity.State.IsQuiescent() || current.Activity.State == domain.ActivityExited {
 			return nil
 		}
 		select {

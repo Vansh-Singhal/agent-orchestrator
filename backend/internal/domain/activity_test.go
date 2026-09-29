@@ -29,3 +29,27 @@ func TestActivityState_StickyAndNeedsInput(t *testing.T) {
 		})
 	}
 }
+
+// IsQuiescent answers a third question: is this session safe to hand to another
+// controller or harness? Idle and both paused states are, because none of them
+// is mid-turn. Active is not, because its work is genuinely in flight, and
+// exited is not, because the terminal is gone and there is nothing to hand over.
+func TestActivityState_IsQuiescent(t *testing.T) {
+	tests := []struct {
+		state     ActivityState
+		quiescent bool
+	}{
+		{ActivityIdle, true},
+		{ActivityWaitingInput, true},
+		{ActivityBlocked, true},
+		{ActivityActive, false},
+		{ActivityExited, false},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.state), func(t *testing.T) {
+			if got := tt.state.IsQuiescent(); got != tt.quiescent {
+				t.Errorf("IsQuiescent() = %v, want %v", got, tt.quiescent)
+			}
+		})
+	}
+}
