@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { ArrowUp, Loader2, Plus, Square, X } from "lucide-react";
+import { ArrowUp, ChevronDown, CornerDownRight, Loader2, MessageSquare, PanelRightClose, Plus, Square, X } from "lucide-react";
 import type { components } from "../../../api/schema";
 import type { ChatDraftExcerptReference } from "../../lib/chat-drafts";
 import type { ChatSkill } from "../../types/conversation";
@@ -153,6 +153,7 @@ export function useIndependentSideChats(sessionId: string, models: ChatModel[], 
 	const [activeId, setActiveId] = useState<string>();
 	const [visible, setVisible] = useState(false);
 	const [snapshot, setSnapshot] = useState<Snapshot>();
+	const [snapshotRefreshKey, setSnapshotRefreshKey] = useState(0);
 	const [olderPages, setOlderPages] = useState<Snapshot[]>([]);
 	const [drafts, setDrafts] = useState<Record<string, SideChatDraft>>({});
 	const draftsRef = useRef(drafts);
@@ -231,7 +232,7 @@ export function useIndependentSideChats(sessionId: string, models: ChatModel[], 
 		}
 		const timer = window.setInterval(() => void refresh(), stream ? 3000 : 500);
 		return () => { alive = false; window.clearInterval(timer); stream?.close(); };
-	}, [sessionId, activeId, baseUrl]);
+	}, [sessionId, activeId, baseUrl, snapshotRefreshKey]);
 
 	const loadOlder = useCallback(async () => {
 		if (!activeId || !snapshot || loadingOlderRef.current) return;
@@ -491,9 +492,40 @@ export function useIndependentSideChats(sessionId: string, models: ChatModel[], 
 	};
 
 	const currentActiveId = sides.some((side) => side.id === activeId && side.sessionId === sessionId) ? activeId : undefined;
+	const activeSide = sides.find((side) => side.id === currentActiveId);
+	const activeNumber = sides.findIndex((side) => side.id === currentActiveId) + 1;
 	const panel = currentActiveId && visible ? (
-		<aside aria-label="Side chats" className="cursor-chat-surface flex h-full min-h-0 w-1/2 min-w-[360px] shrink-0 flex-col border-l border-border bg-background [font-size:14px]">
-			<div className="flex h-10 shrink-0 items-center border-b border-border px-4 text-xs font-medium">/btw</div>
+		<aside aria-label="Side chats" className="cursor-chat-surface flex h-full min-h-0 w-1/2 min-w-0 shrink-0 flex-col overflow-hidden border-l border-border bg-background [font-size:14px]">
+			<header className="shrink-0 border-b border-border">
+				<div className="flex min-h-11 items-center gap-2 px-4">
+					<MessageSquare aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
+					<h2 className="min-w-0 flex-1 truncate text-xs font-medium">Side chat</h2>
+					<span className="text-xs text-muted-foreground">/btw</span>
+					<Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 px-2 text-xs text-muted-foreground" onClick={() => setVisible(false)} title="Hide sidebar and keep your side chats">
+						<PanelRightClose aria-hidden="true" className="size-3.5" /> Hide
+					</Button>
+				</div>
+				<div className="flex min-w-0 items-center gap-2 px-4 pb-3">
+					<div className="relative min-w-0 flex-1">
+						<select aria-label="Current side chat" value={currentActiveId} onChange={(event) => { setActiveId(event.target.value); setFocusKey((key) => key + 1); }}
+							className="h-8 w-full min-w-0 appearance-none rounded-md border border-border bg-surface pl-2.5 pr-7 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+							{sides.map((side, index) => <option key={side.id} value={side.id}>{index + 1} · {side.label.trim() || `Side chat ${index + 1}`}</option>)}
+						</select>
+						<ChevronDown aria-hidden="true" className="pointer-events-none absolute right-2.5 top-2.5 size-3 text-muted-foreground" />
+					</div>
+					<Button type="button" variant="outline" size="sm" className="h-8 shrink-0 gap-1 px-2 text-xs" disabled={pending} onClick={() => void create().catch(() => undefined)} aria-label="Open side chat from latest main reply" title="Reopens the side chat for the latest completed main reply, or creates one after a newer reply.">
+						{pending ? <Loader2 aria-hidden="true" className="size-3 animate-spin" /> : <CornerDownRight aria-hidden="true" className="size-3" />} Latest reply
+					</Button>
+				</div>
+			</header>
+			{activeSide?.selectedText ? <details className="group shrink-0 border-b border-border px-4 py-2.5 text-xs">
+				<summary className="flex cursor-pointer list-none items-center gap-2 text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
+					<CornerDownRight aria-hidden="true" className="size-3.5 shrink-0" />
+					<span className="min-w-0 flex-1 truncate">From a selected message</span>
+					<ChevronDown aria-hidden="true" className="size-3 shrink-0 group-open:rotate-180" />
+				</summary>
+				<blockquote className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap break-words border-l-2 border-border pl-3 leading-relaxed text-muted-foreground">{activeSide.selectedText}</blockquote>
+			</details> : <p className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2.5 text-xs text-muted-foreground"><CornerDownRight aria-hidden="true" className="size-3.5 shrink-0" />A separate thread from your main chat</p>}
 			{snapshot && snapshot.side.id === activeId ? <>
 				{snapshot.side.state !== "ready" ? <p className="border-b border-border px-4 py-2 text-xs text-muted-foreground" role="status">
 					{snapshot.side.errorMessage || (snapshot.side.state === "recovering" ? "Reconnecting side chat…" : snapshot.side.state)}
@@ -502,9 +534,15 @@ export function useIndependentSideChats(sessionId: string, models: ChatModel[], 
 					{selectionAction?.excerpt.conversationId === activeId ? <SelectionActionToolbar anchorX={selectionAction.anchorX} top={selectionAction.top}>
 						<button type="button" className="shrink-0 whitespace-nowrap px-2.5 py-1.5 hover:bg-interactive-hover" onClick={() => { addReference(activeId, selectionAction.excerpt); setSelectionAction(undefined); window.getSelection()?.removeAllRanges(); }}>Add to side chat</button>
 					</SelectionActionToolbar> : null}
-				<div className="cursor-chat-timeline h-full space-y-5 overflow-y-auto px-5 py-6" role="log"
+				<div className="cursor-chat-timeline h-full min-w-0 overflow-x-hidden overflow-y-auto px-4 py-5 [overflow-wrap:anywhere]" role="log" aria-label={`Side chat ${activeNumber} messages`}
 					onMouseUp={(event) => captureSideSelection(event.currentTarget)} onKeyUp={(event) => captureSideSelection(event.currentTarget)}>
-					<div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
+					<div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-5">
+						{timeline.length === 0 && !(snapshot.turns ?? []).length ? <div className="mx-auto flex max-w-sm flex-col items-start gap-2 py-8 text-sm">
+							<MessageSquare aria-hidden="true" className="mb-1 size-5 text-muted-foreground" />
+							<h3 className="font-medium">Explore a question on the side</h3>
+							<p className="text-xs leading-relaxed text-muted-foreground">Ask a follow-up below. This thread has its own messages, so your main conversation can keep going.</p>
+							<p className="text-xs leading-relaxed text-muted-foreground">Hide the sidebar anytime and reopen this thread from its /btw tab.</p>
+						</div> : null}
 						{(olderPages.at(-1)?.hasMore ?? snapshot.hasMore) ? <button type="button" className="self-center text-xs text-muted-foreground underline" onClick={() => void loadOlder()}>Load earlier messages</button> : null}
 						{timeline.map((item) => item.kind === "message" ? (() => {
 							const message: ConversationMessage = { kind: "message", id: item.message.id, turnId: item.message.turnId,
@@ -587,8 +625,13 @@ export function useIndependentSideChats(sessionId: string, models: ChatModel[], 
 								<Button type="button" size="sm" variant="ghost" onClick={() => setEditingTurnId(undefined)}>Cancel</Button></div>
 						</div> : null}
 					</> : null} />
-			</> : <p className="p-4 text-xs text-muted-foreground">Opening side chat…</p>}
-			{error ? <p className="px-4 pb-2 text-xs text-destructive" role="alert">{error}</p> : null}
+			</> : <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center" role="status">
+				{error ? <MessageSquare aria-hidden="true" className="size-5 text-muted-foreground" /> : <Loader2 aria-hidden="true" className="size-5 animate-spin text-muted-foreground" />}
+				<p className="text-sm font-medium">{error ? "Side chat is unavailable" : "Opening side chat…"}</p>
+				<p className="max-w-xs text-xs leading-relaxed text-muted-foreground">{error ? "Your draft stays in this thread. Try loading it again, or return to the main chat while the connection retries automatically." : "Preparing this separate thread. You can keep working in the main chat."}</p>
+				{error ? <Button type="button" variant="outline" size="sm" onClick={() => { setError(undefined); setSnapshotRefreshKey((key) => key + 1); }}>Retry loading</Button> : null}
+			</div>}
+			{error ? <div className="shrink-0 border-t border-border bg-surface px-4 py-3 text-xs" role="alert"><p className="break-words text-destructive">{error}</p></div> : null}
 		</aside>
 	) : null;
 

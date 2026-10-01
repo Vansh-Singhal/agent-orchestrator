@@ -529,9 +529,13 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 					...sideChats.sides.map((side, index) => ({
 						key: `side:${side.id}`,
 						onSelect: () => { sideChats.show(side.id); onSideOpened?.(); },
-						content: <div className="inline-flex h-full items-center border-r border-border bg-overlay text-sm">
-							<button type="button" className="h-full px-3" onClick={() => { sideChats.show(side.id); onSideOpened?.(); }} aria-label={`Show side chat ${index + 1}`}>/btw {index + 1}</button>
-							<button type="button" className="h-full px-2" onClick={() => void sideChats.close(side.id)} aria-label={`Close side chat ${index + 1}`}>×</button>
+						content: <div className={`inline-flex h-full max-w-56 items-center gap-1 border-r border-border text-xs ${sideChats.visible && sideChats.activeId === side.id ? "bg-interactive-hover text-foreground" : "text-muted-foreground"}`}>
+							<button type="button" className="flex h-full min-w-0 items-center gap-2 px-3 text-left hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+								onClick={() => { sideChats.show(side.id); onSideOpened?.(); }} aria-label={`Show side chat ${index + 1}: ${side.label || "Untitled"}`} title={side.label || `Side chat ${index + 1}`} aria-pressed={sideChats.visible && sideChats.activeId === side.id}>
+								<span className="shrink-0 font-medium">/btw {index + 1}</span><span className="truncate">{side.label}</span>
+							</button>
+							<button type="button" className="mr-1 flex size-6 shrink-0 items-center justify-center rounded hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+								onClick={() => { if (window.confirm("Close this side chat? Its draft and conversation will be removed. Use Hide in the sidebar to keep it for later.")) void sideChats.close(side.id); }} aria-label={`Close side chat ${index + 1}`} title="Close and remove side chat"><X aria-hidden="true" className="size-3" /></button>
 						</div>,
 					})),
 				]}
