@@ -534,11 +534,8 @@ export function useIndependentSideChats(sessionId: string, models: ChatModel[], 
 				<div className="cursor-chat-timeline h-full min-w-0 overflow-x-hidden overflow-y-auto px-4 py-5 [overflow-wrap:anywhere]" role="log" aria-label={`Side chat ${activeNumber} messages`}
 					onMouseUp={(event) => captureSideSelection(event.currentTarget)} onKeyUp={(event) => captureSideSelection(event.currentTarget)}>
 					<div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-5">
-						{timeline.length === 0 && !(snapshot.turns ?? []).length ? <div className="mx-auto flex max-w-sm flex-col items-start gap-2 py-8 text-sm">
-							<div className="flex items-center gap-2">
-								<MessageSquare aria-hidden="true" className="size-5 shrink-0 text-muted-foreground" />
-								<h3 className="font-medium">Ask a side question</h3>
-							</div>
+						{timeline.length === 0 && !(snapshot.turns ?? []).length ? <div className="mx-auto flex max-w-sm flex-col items-center gap-2 py-8 text-center text-sm">
+							<h3 className="font-medium">Ask a side question</h3>
 							<p className="text-xs leading-relaxed text-muted-foreground">Explore a follow-up while your main chat continues.</p>
 						</div> : null}
 						{(olderPages.at(-1)?.hasMore ?? snapshot.hasMore) ? <button type="button" className="self-center text-xs text-muted-foreground underline" onClick={() => void loadOlder()}>Load earlier messages</button> : null}
