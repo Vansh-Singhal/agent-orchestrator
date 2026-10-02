@@ -16,6 +16,7 @@ import { TurnSettingsBar } from "./TurnSettingsBar";
 import { QueuedMessageDock } from "./QueuedMessageDock";
 import { Button } from "../ui/button";
 import { SelectionActionToolbar } from "./SelectionActionToolbar";
+import { SettingsOptionMenu } from "../settings/SettingsOptionMenu";
 
 type Side = components["schemas"]["SideConversation"];
 type Snapshot = components["schemas"]["SideSnapshot"];
@@ -500,23 +501,21 @@ export function useIndependentSideChats(sessionId: string, models: ChatModel[], 
 				<div className="flex min-h-11 items-center gap-2 px-4">
 					<MessageSquare aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
 					<h2 className="min-w-0 flex-1 truncate text-xs font-medium">Side chat</h2>
-					<span className="text-xs text-muted-foreground">/btw</span>
 					<Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 px-2 text-xs text-muted-foreground" onClick={() => setVisible(false)} title="Hide sidebar and keep your side chats">
 						<PanelRightClose aria-hidden="true" className="size-3.5" /> Hide
 					</Button>
 				</div>
-				<div className="flex min-w-0 items-center gap-2 px-4 pb-3">
-					<div className="relative min-w-0 flex-1">
-						<select aria-label="Current side chat" value={currentActiveId} onChange={(event) => { setActiveId(event.target.value); setFocusKey((key) => key + 1); }}
-							className="h-8 w-full min-w-0 appearance-none rounded-md border border-border bg-surface pl-2.5 pr-7 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-							{sides.map((side, index) => <option key={side.id} value={side.id}>{index + 1} · {side.label.trim() || `Side chat ${index + 1}`}</option>)}
-						</select>
-						<ChevronDown aria-hidden="true" className="pointer-events-none absolute right-2.5 top-2.5 size-3 text-muted-foreground" />
-					</div>
+				<div className="flex min-w-0 items-center justify-between gap-2 px-4 pb-3">
+					<SettingsOptionMenu aria-label="Current side chat" value={currentActiveId}
+						options={sides.map((side, index) => ({ value: side.id, label: `${index + 1} · ${side.label.trim() || `Side chat ${index + 1}`}` }))}
+						onChange={(sideId) => { setActiveId(sideId); setFocusKey((key) => key + 1); }}
+						triggerClassName="w-fit max-w-64" menuAlign="start" menuClassName="max-w-sm"
+						renderMenuItem={(option) => <span className="min-w-0 truncate" title={option.label}>{option.label}</span>} />
 					<Button type="button" variant="outline" size="sm" className="h-8 shrink-0 gap-1 px-2 text-xs" disabled={pending} onClick={() => void create().catch(() => undefined)} aria-label="Open side chat from latest main reply" title="Reopens the side chat for the latest completed main reply, or creates one after a newer reply.">
 						{pending ? <Loader2 aria-hidden="true" className="size-3 animate-spin" /> : <CornerDownRight aria-hidden="true" className="size-3" />} Latest reply
 					</Button>
 				</div>
+				{!activeSide?.selectedText ? <p className="flex items-center gap-2 px-4 pb-3 text-xs text-muted-foreground"><CornerDownRight aria-hidden="true" className="size-3.5 shrink-0" />A separate thread from your main chat</p> : null}
 			</header>
 			{activeSide?.selectedText ? <details className="group shrink-0 border-b border-border px-4 py-2.5 text-xs">
 				<summary className="flex cursor-pointer list-none items-center gap-2 text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
@@ -525,7 +524,7 @@ export function useIndependentSideChats(sessionId: string, models: ChatModel[], 
 					<ChevronDown aria-hidden="true" className="size-3 shrink-0 group-open:rotate-180" />
 				</summary>
 				<blockquote className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap break-words border-l-2 border-border pl-3 leading-relaxed text-muted-foreground">{activeSide.selectedText}</blockquote>
-			</details> : <p className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2.5 text-xs text-muted-foreground"><CornerDownRight aria-hidden="true" className="size-3.5 shrink-0" />A separate thread from your main chat</p>}
+			</details> : null}
 			{snapshot && snapshot.side.id === activeId ? <>
 				{snapshot.side.state !== "ready" ? <p className="border-b border-border px-4 py-2 text-xs text-muted-foreground" role="status">
 					{snapshot.side.errorMessage || (snapshot.side.state === "recovering" ? "Reconnecting side chat…" : snapshot.side.state)}
