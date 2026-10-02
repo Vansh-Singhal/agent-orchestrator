@@ -498,7 +498,7 @@ export function useIndependentSideChats(sessionId: string, models: ChatModel[], 
 	const panel = currentActiveId && visible ? (
 		<aside aria-label="Side chats" className="cursor-chat-surface flex h-full min-h-0 w-1/2 min-w-0 shrink-0 flex-col overflow-hidden border-l border-border bg-background [font-size:14px]">
 			<header className="shrink-0 border-b border-border">
-				<div className="flex min-w-0 items-center justify-between gap-2 pl-3 pr-1 py-2">
+				<div className="flex min-w-0 items-center justify-between gap-2 pl-2 pr-1 py-2">
 					<SettingsOptionMenu aria-label="Current side chat" value={currentActiveId}
 						options={sides.map((side, index) => ({ value: side.id, label: `${index + 1} · ${side.label.trim() || `Side chat ${index + 1}`}` }))}
 						onChange={(sideId) => { setActiveId(sideId); setFocusKey((key) => key + 1); }}
@@ -513,7 +513,7 @@ export function useIndependentSideChats(sessionId: string, models: ChatModel[], 
 						</Button>
 					</div>
 				</div>
-				{!activeSide?.selectedText ? <p className="flex items-center gap-2 px-3 pb-2 text-xs text-muted-foreground"><CornerDownRight aria-hidden="true" className="size-3.5 shrink-0" />A separate thread from your main chat</p> : null}
+				{!activeSide?.selectedText ? <p className="flex items-center gap-2 px-2 pb-2 text-xs text-muted-foreground"><CornerDownRight aria-hidden="true" className="size-3.5 shrink-0" />A separate thread from your main chat</p> : null}
 			</header>
 			{activeSide?.selectedText ? <details className="group shrink-0 border-b border-border px-4 py-2.5 text-xs">
 				<summary className="flex cursor-pointer list-none items-center gap-2 text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
