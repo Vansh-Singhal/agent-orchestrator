@@ -498,7 +498,7 @@ export function useIndependentSideChats(sessionId: string, models: ChatModel[], 
 	const panel = currentActiveId && visible ? (
 		<aside aria-label="Side chats" className="cursor-chat-surface flex h-full min-h-0 w-1/2 min-w-0 shrink-0 flex-col overflow-hidden border-l border-border bg-background [font-size:14px]">
 			<header className="shrink-0 border-b border-border">
-				<div className="flex min-w-0 items-center justify-between gap-2 px-4 py-3">
+				<div className="flex min-w-0 items-center justify-between gap-2 pl-3 pr-1 py-2">
 					<SettingsOptionMenu aria-label="Current side chat" value={currentActiveId}
 						options={sides.map((side, index) => ({ value: side.id, label: `${index + 1} · ${side.label.trim() || `Side chat ${index + 1}`}` }))}
 						onChange={(sideId) => { setActiveId(sideId); setFocusKey((key) => key + 1); }}
@@ -508,12 +508,12 @@ export function useIndependentSideChats(sessionId: string, models: ChatModel[], 
 						<Button type="button" variant="outline" size="sm" className="h-8 gap-1 px-2 text-xs" disabled={pending} onClick={() => void create().catch(() => undefined)} aria-label="Open side chat from latest main reply" title="Reopens the side chat for the latest completed main reply, or creates one after a newer reply.">
 							{pending ? <Loader2 aria-hidden="true" className="size-3 animate-spin" /> : <CornerDownRight aria-hidden="true" className="size-3" />} Open from latest reply
 						</Button>
-						<Button type="button" variant="ghost" size="icon-sm" className="size-8 text-muted-foreground" onClick={() => setVisible(false)} aria-label="Hide side chat" title="Hide sidebar and keep your side chats">
+						<Button type="button" variant="ghost" size="icon-sm" className="size-control-md text-muted-foreground" onClick={() => setVisible(false)} aria-label="Hide side chat" title="Hide sidebar and keep your side chats">
 							<PanelRightClose aria-hidden="true" className="size-3.5" />
 						</Button>
 					</div>
 				</div>
-				{!activeSide?.selectedText ? <p className="flex items-center gap-2 px-4 pb-3 text-xs text-muted-foreground"><CornerDownRight aria-hidden="true" className="size-3.5 shrink-0" />A separate thread from your main chat</p> : null}
+				{!activeSide?.selectedText ? <p className="flex items-center gap-2 px-3 pb-2 text-xs text-muted-foreground"><CornerDownRight aria-hidden="true" className="size-3.5 shrink-0" />A separate thread from your main chat</p> : null}
 			</header>
 			{activeSide?.selectedText ? <details className="group shrink-0 border-b border-border px-4 py-2.5 text-xs">
 				<summary className="flex cursor-pointer list-none items-center gap-2 text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
