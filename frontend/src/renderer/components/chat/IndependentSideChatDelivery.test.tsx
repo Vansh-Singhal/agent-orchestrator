@@ -1,4 +1,8 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { useEffect } from "react";
+import userEvent from "@testing-library/user-event";
+import { TooltipProvider } from "../ui/tooltip";
+import { lexicalEditorText, typeInLexicalEditor } from "../../test/lexical";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useIndependentSideChats } from "./IndependentSideChats";
 
@@ -124,4 +128,108 @@ describe("side delivery draft ownership", () => {
 		expect(put.mock.calls.length).toBe(savedCount);
 	});
 
+});
+
+const panelSides = ["side", "other"].map((id, index) => ({
+	id, sessionId: "session", mainConversationId: "main", state: "ready", contextMode: "native",
+	label: index === 0 ? "First question" : "Second question",
+	createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+}));
+
+function SidePanelHarness() {
+	const chat = useIndependentSideChats("session", [], [], async () => [], false);
+	useEffect(() => { chat.show("side"); }, []);
+	return <TooltipProvider><button onClick={() => chat.show("side")}>Reopen side chat</button>{chat.panel}</TooltipProvider>;
+}
+
+describe("side panel navigation and recovery", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		get.mockImplementation(async (path: string, options?: { params?: { path?: { sideId?: string } } }) => {
+			if (path.endsWith("/side-chats")) return { data: { sides: panelSides } };
+			const side = panelSides.find((item) => item.id === options?.params?.path?.sideId) ?? panelSides[0];
+			if (path.endsWith("/draft")) return { data: { contentJson: JSON.stringify({ version: 1, text: side.id === "side" ? "First draft" : "Second draft", attachments: [], references: [] }) } };
+			return { data: { snapshot: { side, messages: [], turns: [], activities: [], hasMore: false } } };
+		});
+		put.mockResolvedValue({});
+		post.mockResolvedValue({ data: { side: panelSides[0] } });
+		remove.mockResolvedValue({});
+	});
+
+	it.each([undefined, "", "   "])("renders a fallback for an absent or blank side label (%s)", async (label) => {
+		const normalGet = get.getMockImplementation()!;
+		get.mockImplementation(async (path, options) => {
+			const result = await normalGet(path, options);
+			if (path.endsWith("/side-chats")) return { data: { sides: panelSides.map((side) => ({ ...side, label: side.id === "side" ? label : side.label })) } };
+			if (result.data?.snapshot?.side.id === "side") result.data.snapshot.side = { ...result.data.snapshot.side, label };
+			return result;
+		});
+		render(<SidePanelHarness />);
+		expect(await screen.findByRole("button", { name: "Current side chat" })).toHaveTextContent("1 · Side chat 1");
+		await screen.findByLabelText("Side chat question");
+	});
+
+	it("hides and reopens without closing the conversation or losing its draft", async () => {
+		render(<SidePanelHarness />);
+		const field = await screen.findByLabelText("Side chat question");
+		await waitFor(() => expect(lexicalEditorText(field)).toBe("First draft"));
+		await typeInLexicalEditor(field, " with an unsent follow-up");
+		await userEvent.click(screen.getByRole("button", { name: "Hide side chat" }));
+		expect(screen.queryByRole("complementary", { name: "Side chats" })).not.toBeInTheDocument();
+		expect(remove).not.toHaveBeenCalled();
+		await userEvent.click(screen.getByRole("button", { name: "Reopen side chat" }));
+		await waitFor(() => expect(lexicalEditorText(screen.getByLabelText("Side chat question"))).toBe("First draft with an unsent follow-up"));
+	});
+
+	it("restores keyboard focus on Escape and switches to the selected thread's draft", async () => {
+		const user = userEvent.setup();
+		render(<SidePanelHarness />);
+		const trigger = await screen.findByRole("button", { name: "Current side chat" });
+		await user.click(trigger);
+		await screen.findByRole("menuitem", { name: "2 · Second question" });
+		await user.keyboard("{Escape}");
+		await waitFor(() => expect(trigger).toHaveFocus());
+		await user.click(trigger);
+		const option = await screen.findByRole("menuitem", { name: "2 · Second question" });
+		option.focus();
+		await user.keyboard("{Enter}");
+		await waitFor(() => expect(trigger).toHaveTextContent("2 · Second question"));
+		await waitFor(() => expect(lexicalEditorText(screen.getByLabelText("Side chat question"))).toBe("Second draft"));
+		expect(get).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/conversation/side-chats/{sideId}", { params: { path: { sessionId: "session", sideId: "other" } } });
+	});
+
+	it("retries a failed initial snapshot GET without sending or recovering the provider", async () => {
+		const normalGet = get.getMockImplementation()!;
+		let unavailable = true;
+		get.mockImplementation(async (path, options) => path.endsWith("/{sideId}") && unavailable ? { error: {} } : normalGet(path, options));
+		render(<SidePanelHarness />);
+		const retry = await screen.findByRole("button", { name: "Retry loading" });
+		expect(screen.queryByLabelText("Side chat question")).not.toBeInTheDocument();
+		get.mockClear();
+		unavailable = false;
+		await userEvent.click(retry);
+		await screen.findByLabelText("Side chat question");
+		expect(get).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/conversation/side-chats/{sideId}", { params: { path: { sessionId: "session", sideId: "side" } } });
+		expect(post).not.toHaveBeenCalled();
+		expect(remove).not.toHaveBeenCalled();
+	});
+
+	it("does not offer loading recovery for a draft save error on a loaded thread", async () => {
+		put.mockResolvedValue({ error: {} });
+		render(<SidePanelHarness />);
+		await screen.findByLabelText("Side chat question");
+		await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Send failed"));
+		expect(screen.queryByRole("button", { name: "Retry loading" })).not.toBeInTheDocument();
+		expect(screen.getByLabelText("Side chat question")).toBeInTheDocument();
+	});
+
+	it("opens the latest anchor without duplicating an existing side chat", async () => {
+		render(<SidePanelHarness />);
+		await screen.findByLabelText("Side chat question");
+		await userEvent.click(screen.getByRole("button", { name: "Open side chat from latest main reply" }));
+		await waitFor(() => expect(post).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/conversation/side-chats", expect.objectContaining({ params: { path: { sessionId: "session" } } })));
+		await userEvent.click(screen.getByRole("button", { name: "Current side chat" }));
+		expect(await screen.findAllByRole("menuitem")).toHaveLength(2);
+		expect(remove).not.toHaveBeenCalled();
+	});
 });

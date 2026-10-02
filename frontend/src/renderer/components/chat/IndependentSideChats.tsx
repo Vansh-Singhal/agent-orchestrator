@@ -500,7 +500,7 @@ export function useIndependentSideChats(sessionId: string, models: ChatModel[], 
 			<header className="shrink-0 border-b border-border">
 				<div className="flex min-w-0 items-center justify-between gap-2 pl-2 pr-1 py-2">
 					<SettingsOptionMenu aria-label="Current side chat" value={currentActiveId}
-						options={sides.map((side, index) => ({ value: side.id, label: `${index + 1} · ${side.label.trim() || `Side chat ${index + 1}`}` }))}
+						options={sides.map((side, index) => ({ value: side.id, label: `${index + 1} · ${side.label?.trim() || `Side chat ${index + 1}`}` }))}
 						onChange={(sideId) => { setActiveId(sideId); setFocusKey((key) => key + 1); }}
 						triggerClassName="w-fit max-w-64" menuAlign="start" menuClassName="max-w-sm"
 						renderMenuItem={(option) => <span className="min-w-0 truncate" title={option.label}>{option.label}</span>} />
