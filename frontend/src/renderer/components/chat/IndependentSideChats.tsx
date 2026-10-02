@@ -498,22 +498,20 @@ export function useIndependentSideChats(sessionId: string, models: ChatModel[], 
 	const panel = currentActiveId && visible ? (
 		<aside aria-label="Side chats" className="cursor-chat-surface flex h-full min-h-0 w-1/2 min-w-0 shrink-0 flex-col overflow-hidden border-l border-border bg-background [font-size:14px]">
 			<header className="shrink-0 border-b border-border">
-				<div className="flex min-h-11 items-center gap-2 px-4">
-					<MessageSquare aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
-					<h2 className="min-w-0 flex-1 truncate text-xs font-medium">Side chat</h2>
-					<Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 px-2 text-xs text-muted-foreground" onClick={() => setVisible(false)} title="Hide sidebar and keep your side chats">
-						<PanelRightClose aria-hidden="true" className="size-3.5" /> Hide
-					</Button>
-				</div>
-				<div className="flex min-w-0 items-center justify-between gap-2 px-4 pb-3">
+				<div className="flex min-w-0 items-center justify-between gap-2 px-4 py-3">
 					<SettingsOptionMenu aria-label="Current side chat" value={currentActiveId}
 						options={sides.map((side, index) => ({ value: side.id, label: `${index + 1} · ${side.label.trim() || `Side chat ${index + 1}`}` }))}
 						onChange={(sideId) => { setActiveId(sideId); setFocusKey((key) => key + 1); }}
 						triggerClassName="w-fit max-w-64" menuAlign="start" menuClassName="max-w-sm"
 						renderMenuItem={(option) => <span className="min-w-0 truncate" title={option.label}>{option.label}</span>} />
-					<Button type="button" variant="outline" size="sm" className="h-8 shrink-0 gap-1 px-2 text-xs" disabled={pending} onClick={() => void create().catch(() => undefined)} aria-label="Open side chat from latest main reply" title="Reopens the side chat for the latest completed main reply, or creates one after a newer reply.">
-						{pending ? <Loader2 aria-hidden="true" className="size-3 animate-spin" /> : <CornerDownRight aria-hidden="true" className="size-3" />} Latest reply
-					</Button>
+					<div className="flex shrink-0 items-center gap-1">
+						<Button type="button" variant="outline" size="sm" className="h-8 gap-1 px-2 text-xs" disabled={pending} onClick={() => void create().catch(() => undefined)} aria-label="Open side chat from latest main reply" title="Reopens the side chat for the latest completed main reply, or creates one after a newer reply.">
+							{pending ? <Loader2 aria-hidden="true" className="size-3 animate-spin" /> : <CornerDownRight aria-hidden="true" className="size-3" />} Open from latest reply
+						</Button>
+						<Button type="button" variant="ghost" size="icon-sm" className="size-8 text-muted-foreground" onClick={() => setVisible(false)} aria-label="Hide side chat" title="Hide sidebar and keep your side chats">
+							<PanelRightClose aria-hidden="true" className="size-3.5" />
+						</Button>
+					</div>
 				</div>
 				{!activeSide?.selectedText ? <p className="flex items-center gap-2 px-4 pb-3 text-xs text-muted-foreground"><CornerDownRight aria-hidden="true" className="size-3.5 shrink-0" />A separate thread from your main chat</p> : null}
 			</header>
