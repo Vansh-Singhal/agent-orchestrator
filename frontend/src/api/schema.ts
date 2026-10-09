@@ -5785,6 +5785,7 @@ export interface components {
             mainConversationId: string;
             manualLabel?: boolean;
             model?: string;
+            recreateRequired?: boolean;
             selectedText?: string;
             sessionId: string;
             sourceMessageId?: string;
@@ -5840,6 +5841,8 @@ export interface components {
             activityProviderIds?: {
                 [key: string]: string;
             };
+            boundaryState?: string;
+            boundaryTurnId?: string;
             createKey: string;
             decisionData?: {
                 [key: string]: string[];
@@ -5853,6 +5856,7 @@ export interface components {
             };
             messages: components["schemas"]["SideMessage"][];
             nativeAnchorId: string;
+            policyVersion: number;
             providerForkId: string;
             providerHostId: string;
             referenceContext: string;
