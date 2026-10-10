@@ -5843,6 +5843,7 @@ export interface components {
             };
             boundaryState?: string;
             boundaryTurnId?: string;
+            cleanupOnly?: boolean;
             createKey: string;
             decisionData?: {
                 [key: string]: string[];
@@ -5850,6 +5851,7 @@ export interface components {
             draft: string;
             generation: string;
             harness: string;
+            hostStopped?: boolean;
             launchConfig: unknown;
             messageProviderIds?: {
                 [key: string]: string;

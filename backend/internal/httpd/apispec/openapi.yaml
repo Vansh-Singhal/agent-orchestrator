@@ -16650,6 +16650,8 @@ components:
           type: string
         boundaryTurnId:
           type: string
+        cleanupOnly:
+          type: boolean
         createKey:
           type: string
         decisionData:
@@ -16665,6 +16667,8 @@ components:
           type: string
         harness:
           type: string
+        hostStopped:
+          type: boolean
         launchConfig: {}
         messageProviderIds:
           additionalProperties:
