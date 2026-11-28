@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -998,6 +998,35 @@ describe("SessionArtifactsView", () => {
 			delete (document as { activeElement?: Element | null }).activeElement;
 			onEscape.mockRestore();
 			setArmed.mockRestore();
+		}
+	});
+
+	it("closes only a menu opened over the page while focus stayed in it, then leaves full screen", async () => {
+		let escape: (() => void) | undefined;
+		const onEscape = vi.spyOn(aoBridge.artifactEscape, "onEscape").mockImplementation((listener) => {
+			escape = listener;
+			return () => undefined;
+		});
+		try {
+			renderView(<SessionArtifactsView request={{ key: 1, path: "report.html" }} session={session()} />);
+			await userEvent.click(screen.getByRole("button", { name: "Maximize" }));
+			const overlay = screen.getByRole("dialog", { name: "report.html" });
+			await userEvent.click(within(overlay).getByRole("button", { name: /^report\.html/ }));
+			expect(await screen.findByRole("menu")).toBeInTheDocument();
+			// Opening the menu with a click can leave focus in the page, so the
+			// Escape reaches only main, which reports it.
+			const page = overlay.querySelector("iframe")!;
+			Object.defineProperty(document, "activeElement", { configurable: true, get: () => page });
+
+			act(() => escape?.());
+			await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+			expect(screen.getByRole("dialog", { name: "report.html" })).toBeInTheDocument();
+
+			act(() => escape?.());
+			expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+		} finally {
+			delete (document as { activeElement?: Element | null }).activeElement;
+			onEscape.mockRestore();
 		}
 	});
 

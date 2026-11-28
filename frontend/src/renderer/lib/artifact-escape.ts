@@ -21,17 +21,20 @@ function disarm() {
 	if (armed === 0) aoBridge.artifactEscape.setArmed(false);
 }
 
-/** Whether focus is in a framed page inside `container`, whose keys this document never sees. */
-function framedPageFocused(container: Element): boolean {
+/** The framed page inside `container` that holds focus, whose keys this document never sees. */
+function focusedFramedPage(container: Element): Element | null {
 	const active = document.activeElement;
-	return (active instanceof HTMLIFrameElement || active?.tagName === "WEBVIEW") && container.contains(active);
+	return (active instanceof HTMLIFrameElement || active?.tagName === "WEBVIEW") && container.contains(active) ? active : null;
 }
 
 /**
- * While `active`, calls `onEscape` when Escape is pressed with focus in a
- * framed page inside `container`. Escape with focus anywhere else is left to
- * this document's own listeners, so it is never handled twice; a menu or
- * dialog open over the page keeps focus in this document and keeps its Escape.
+ * While `active`, handles Escape pressed with focus in a framed page inside
+ * `container` as if it had been pressed on the frame itself: it is dispatched
+ * there, so the topmost layer over the page takes it first. A menu opened over
+ * the page while focus stayed in it closes, and the surface stays; with
+ * nothing over the page, the surface's own Escape handling runs, and
+ * `onEscape` is called only if none took it. Escape with focus anywhere else
+ * already reaches this document, so it is left to its own listeners.
  */
 export function useArtifactFrameEscape(active: boolean, container: () => Element | null, onEscape: () => void): void {
 	const containerRef = useRef(container);
@@ -43,7 +46,10 @@ export function useArtifactFrameEscape(active: boolean, container: () => Element
 		arm();
 		const stop = aoBridge.artifactEscape.onEscape(() => {
 			const element = containerRef.current();
-			if (element && framedPageFocused(element)) onEscapeRef.current();
+			const page = element ? focusedFramedPage(element) : null;
+			if (!page) return;
+			const escape = new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true, composed: true });
+			if (page.dispatchEvent(escape)) onEscapeRef.current();
 		});
 		return () => {
 			stop();

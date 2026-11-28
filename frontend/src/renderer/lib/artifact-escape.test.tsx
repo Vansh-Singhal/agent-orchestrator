@@ -51,6 +51,24 @@ describe("useArtifactFrameEscape", () => {
 		expect(onEscape).toHaveBeenCalledTimes(2);
 	});
 
+	it("lets a layer over the page, such as a menu opened while focus stayed in it, take Escape first", () => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const onEscape = vi.fn();
+		render(<Surface active container={() => container} onEscape={onEscape} />);
+		const page = focusFrameIn(container);
+		const layer = vi.fn((event: KeyboardEvent) => event.preventDefault());
+		document.addEventListener("keydown", layer, true);
+		try {
+			act(() => escape?.());
+		} finally {
+			document.removeEventListener("keydown", layer, true);
+		}
+		expect(layer).toHaveBeenCalledOnce();
+		expect(layer.mock.calls[0][0]).toMatchObject({ key: "Escape", target: page });
+		expect(onEscape).not.toHaveBeenCalled();
+	});
+
 	it("leaves Escape with focus in this document, or in a frame elsewhere, to its own handlers", () => {
 		const container = document.createElement("div");
 		const button = document.createElement("button");

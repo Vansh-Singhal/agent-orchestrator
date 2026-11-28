@@ -756,6 +756,45 @@ describe("ArtifactsView", () => {
 		}
 	});
 
+	it("closes only a menu opened over the previewed page while focus stayed in it, then the preview", async () => {
+		const user = userEvent.setup();
+		let escape: (() => void) | undefined;
+		const onEscape = vi.spyOn(aoBridge.artifactEscape, "onEscape").mockImplementation((listener) => {
+			escape = listener;
+			return () => undefined;
+		});
+		const html = session("ao-html", "Design review", [{ name: "page.html", kind: "html", updatedAt: "2026-10-11T10:00:00Z" }]);
+		html.artifactFiles![0].inlineUrl = "http://ao-inline-artifact.ao-html.localhost:3002/page.html";
+		html.artifactFiles![0].rawUrl = "http://127.0.0.1:3002/page.html?raw=true";
+		vi.stubGlobal("fetch", vi.fn(async () => new Response("<h1>Design review</h1>")));
+		mocks.workspaces = [{ id: "ao", name: "AO", path: "/code/ao", sessions: [html] }];
+		try {
+			renderView();
+			await user.click(within(artifactList()).getByRole("button", { name: /^page\.html/ }));
+			const dialog = screen.getByRole("dialog", { name: "page.html" });
+			const page = await waitFor(() => {
+				const frame = dialog.querySelector("iframe");
+				expect(frame).not.toBeNull();
+				return frame!;
+			});
+			await user.click(within(dialog).getByRole("button", { name: "More actions: page.html" }));
+			expect(await screen.findByRole("menu")).toBeInTheDocument();
+			// Opening the menu with a click can leave focus in the page, so the
+			// Escape reaches only main, which reports it.
+			Object.defineProperty(document, "activeElement", { configurable: true, get: () => page });
+
+			act(() => escape?.());
+			await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+			expect(screen.getByRole("dialog", { name: "page.html" })).toBeInTheDocument();
+
+			act(() => escape?.());
+			await waitFor(() => expect(screen.queryByRole("dialog", { name: "page.html" })).not.toBeInTheDocument());
+		} finally {
+			delete (document as { activeElement?: Element | null }).activeElement;
+			onEscape.mockRestore();
+		}
+	});
+
 	it("says when the links shared with this person did not load, keeping the rest listed", async () => {
 		const user = userEvent.setup();
 		mocks.sharedFailed = true;
