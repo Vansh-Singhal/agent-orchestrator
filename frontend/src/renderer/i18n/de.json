@@ -3240,6 +3240,7 @@
 	"settings.windowTranslucencyHint": "Den Desktop hinter dem App-Fenster weichzeichnen.",
 	"settings.windowTranslucencyUnsupported": "Erfordert Windows 11 Version 22H2 oder neuer.",
 	"settings.windowTranslucencySystem": "Durch die Transparenz- oder Kontrasteinstellungen des Systems pausiert.",
+	"settings.windowTranslucencySystemWindows": "Von Windows pausiert. Aktiviere Transparenzeffekte unter Einstellungen > Personalisierung > Farben oder deaktiviere Kontrastdesigns.",
 	"settings.windowTranslucencyError": "Fenstertransparenz konnte nicht angewendet werden. Schalte sie aus und wieder ein, um es erneut zu versuchen.",
 	"settings.harness": "Agenten",
 	"settings.harness.thisComputer": "Dieser Computer",

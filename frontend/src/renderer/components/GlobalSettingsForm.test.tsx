@@ -333,7 +333,7 @@ describe("GlobalSettingsForm", () => {
 		Object.assign(transparencyState, { supported: true, enabled: false, reason: "system" });
 		renderForm("general");
 		expect(screen.getByRole("switch", { name: "Window transparency" })).toBeEnabled();
-		expect(screen.getByText("Paused by your system transparency or contrast settings.")).toBeVisible();
+		expect(screen.getByText("Paused by Windows. Turn on Transparency effects in Settings > Personalization > Colors, or turn off contrast themes.")).toBeVisible();
 	});
 
 	it("propagates a Harness focus target through the settings catalog", async () => {

@@ -14,6 +14,8 @@ export function windowTransparencyPresentation(
 		disabled: unsupported,
 		hint: state.reason === "error" ? "settings.windowTranslucencyError" as const
 			: unsupported ? "settings.windowTranslucencyUnsupported" as const
+			// Windows names the exact setting; macOS keeps the generic system wording.
+			: state.reason === "system" && platform.windows ? "settings.windowTranslucencySystemWindows" as const
 			: state.reason === "system" ? "settings.windowTranslucencySystem" as const
 			: "settings.windowTranslucencyHint" as const,
 	};

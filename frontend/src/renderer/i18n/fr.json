@@ -3309,6 +3309,7 @@
 	"settings.windowTranslucencyHint": "Flouter le bureau derrière la fenêtre de l’app.",
 	"settings.windowTranslucencyUnsupported": "Nécessite Windows 11 version 22H2 ou ultérieure.",
 	"settings.windowTranslucencySystem": "Suspendue par les paramètres de transparence ou de contraste du système.",
+	"settings.windowTranslucencySystemWindows": "Suspendue par Windows. Activez les effets de transparence dans Paramètres > Personnalisation > Couleurs, ou désactivez les thèmes de contraste.",
 	"settings.windowTranslucencyError": "Impossible d’appliquer la transparence de la fenêtre. Désactivez puis réactivez l’interrupteur pour réessayer.",
 	"settings.harness": "Agents",
 	"settings.harness.thisComputer": "Cet ordinateur",

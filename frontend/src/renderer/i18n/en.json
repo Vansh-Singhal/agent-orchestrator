@@ -2139,6 +2139,7 @@
 	"settings.windowTranslucencyHint": "Blur the desktop behind the app window.",
 	"settings.windowTranslucencyUnsupported": "Requires Windows 11 version 22H2 or newer.",
 	"settings.windowTranslucencySystem": "Paused by your system transparency or contrast settings.",
+	"settings.windowTranslucencySystemWindows": "Paused by Windows. Turn on Transparency effects in Settings > Personalization > Colors, or turn off contrast themes.",
 	"settings.windowTranslucencyError": "Couldn't apply window transparency. Turn it off and on again to retry.",
 	"settings.harness": "Agents",
 	"settings.harness.thisComputer": "This computer",

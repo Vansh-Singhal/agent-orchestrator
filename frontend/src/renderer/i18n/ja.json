@@ -3240,6 +3240,7 @@
 	"settings.windowTranslucencyHint": "アプリのウィンドウの背後にあるデスクトップをぼかします。",
 	"settings.windowTranslucencyUnsupported": "Windows 11 バージョン 22H2 以降が必要です。",
 	"settings.windowTranslucencySystem": "システムの透明度またはコントラスト設定により一時停止しています。",
+	"settings.windowTranslucencySystemWindows": "Windows により一時停止しています。設定 > 個人用設定 > 色 で透明効果をオンにするか、コントラスト テーマをオフにしてください。",
 	"settings.windowTranslucencyError": "ウィンドウの透明度を適用できませんでした。スイッチを一度オフにしてからオンにして再試行してください。",
 	"settings.harness": "エージェント",
 	"settings.harness.thisComputer": "このコンピューター",

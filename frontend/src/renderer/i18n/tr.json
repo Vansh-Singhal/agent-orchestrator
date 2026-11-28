@@ -2139,6 +2139,7 @@
 	"settings.windowTranslucencyHint": "Uygulama penceresinin arkasındaki masaüstünü bulanıklaştırır.",
 	"settings.windowTranslucencyUnsupported": "Windows 11 sürüm 22H2 veya üzeri gerekir.",
 	"settings.windowTranslucencySystem": "Sisteminizin saydamlık veya karşıtlık ayarları nedeniyle duraklatıldı.",
+	"settings.windowTranslucencySystemWindows": "Windows tarafından duraklatıldı. Ayarlar > Kişiselleştirme > Renkler bölümünden saydamlık efektlerini açın veya karşıtlık temalarını kapatın.",
 	"settings.windowTranslucencyError": "Pencere saydamlığı uygulanamadı. Yeniden denemek için anahtarı kapatıp tekrar açın.",
 	"settings.harness": "Ajanlar",
 	"settings.harness.thisComputer": "Bu bilgisayar",

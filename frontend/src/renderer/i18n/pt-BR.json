@@ -3309,6 +3309,7 @@
 	"settings.windowTranslucencyHint": "Desfoca a área de trabalho atrás da janela do app.",
 	"settings.windowTranslucencyUnsupported": "Requer Windows 11 versão 22H2 ou posterior.",
 	"settings.windowTranslucencySystem": "Pausada pelas configurações de transparência ou contraste do sistema.",
+	"settings.windowTranslucencySystemWindows": "Pausada pelo Windows. Ative os efeitos de transparência em Configurações > Personalização > Cores ou desative os temas de contraste.",
 	"settings.windowTranslucencyError": "Não foi possível aplicar a transparência da janela. Desative e reative o interruptor para tentar novamente.",
 	"settings.harness": "Agentes",
 	"settings.harness.thisComputer": "Este computador",

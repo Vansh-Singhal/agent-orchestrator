@@ -3310,6 +3310,7 @@
 	"settings.windowTranslucencyHint": "模糊应用窗口后方的桌面。",
 	"settings.windowTranslucencyUnsupported": "需要 Windows 11 版本 22H2 或更高版本。",
 	"settings.windowTranslucencySystem": "已根据系统透明度或对比度设置暂停。",
+	"settings.windowTranslucencySystemWindows": "已被 Windows 暂停。请在“设置 > 个性化 > 颜色”中打开透明效果，或关闭对比度主题。",
 	"settings.windowTranslucencyError": "无法应用窗口透明度。请先关闭再重新打开开关以重试。",
 	"settings.harness": "智能体",
 	"settings.harness.thisComputer": "这台电脑",

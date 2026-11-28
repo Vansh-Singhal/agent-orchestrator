@@ -2171,6 +2171,7 @@
 	"settings.windowTranslucencyHint": "Размывать рабочий стол за окном приложения.",
 	"settings.windowTranslucencyUnsupported": "Требуется Windows 11 версии 22H2 или новее.",
 	"settings.windowTranslucencySystem": "Приостановлена настройками прозрачности или контрастности системы.",
+	"settings.windowTranslucencySystemWindows": "Приостановлена Windows. Включите эффекты прозрачности в разделе «Параметры > Персонализация > Цвета» или отключите контрастные темы.",
 	"settings.windowTranslucencyError": "Не удалось применить прозрачность окна. Выключите и снова включите настройку, чтобы повторить попытку.",
 	"settings.harness": "Агенты",
 	"settings.harness.thisComputer": "Этот компьютер",

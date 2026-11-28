@@ -15,7 +15,7 @@ describe("palette registry", () => {
 		[{ supported: true, enabled: true, reason: null }, false, "settings.windowTranslucencyHint"],
 		[{ supported: false, enabled: false, reason: "unsupported" }, true, "settings.windowTranslucencyUnsupported"],
 		[{ supported: null, enabled: false, reason: "error" }, false, "settings.windowTranslucencyError"],
-		[{ supported: true, enabled: false, reason: "system" }, false, "settings.windowTranslucencySystem"],
+		[{ supported: true, enabled: false, reason: "system" }, false, "settings.windowTranslucencySystemWindows"],
 	] as const)("keeps command search availability consistent with Appearance for %j", (transparency, disabled, hint) => {
 		const item = buildSettingsCommands(t, { developerMode: false, diagnostics: false, windows: true, transparency })
 			.find((item) => item.id === "setting:transparency")!;

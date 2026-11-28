@@ -9,9 +9,14 @@ describe("window transparency presentation", () => {
 		[{ supported: false, enabled: false, reason: "unsupported" }, true, "settings.windowTranslucencyUnsupported"],
 		[{ supported: null, enabled: false, reason: "error" }, false, "settings.windowTranslucencyError"],
 		[{ supported: false, enabled: false, reason: "error" }, false, "settings.windowTranslucencyError"],
-		[{ supported: true, enabled: false, reason: "system" }, false, "settings.windowTranslucencySystem"],
+		[{ supported: true, enabled: false, reason: "system" }, false, "settings.windowTranslucencySystemWindows"],
 	] as const)("keeps Windows discoverable for %j", (state, disabled, hint) => {
 		expect(windowTransparencyPresentation(state, { mac: false, windows: true })).toEqual({ visible: true, disabled, hint });
+	});
+	it("names the Windows setting when Windows pauses it, but keeps the generic wording on macOS", () => {
+		const paused: WindowTransparencyView = { supported: true, enabled: false, reason: "system" };
+		expect(windowTransparencyPresentation(paused, { mac: false, windows: true }).hint).toBe("settings.windowTranslucencySystemWindows");
+		expect(windowTransparencyPresentation(paused, { mac: true, windows: false }).hint).toBe("settings.windowTranslucencySystem");
 	});
 	it("shows macOS during startup and errors, and never offers the setting on Linux", () => {
 		for (const reason of [null, "error"] as const) {
