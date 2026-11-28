@@ -6,7 +6,7 @@ import { useKeybindingsStore } from "../stores/keybindings-store";
 import { useAppShortcut, useSessionShortcut } from "./useAppShortcut";
 import type { AppShortcutId } from "../../shared/shortcuts";
 
-vi.mock("../lib/platform", () => ({ isMacPlatform: () => false }));
+vi.mock("../lib/platform", () => ({ isMacPlatform: () => false, isWindowsPlatform: () => false }));
 
 const ID = "command-palette" as AppShortcutId;
 const OTHER = "quick-open-file" as AppShortcutId;
