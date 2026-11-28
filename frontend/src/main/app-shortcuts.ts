@@ -37,6 +37,8 @@ type BeforeInput = {
 	alt: boolean;
 	type: string;
 	isAutoRepeat?: boolean;
+	// An IME composition is in progress; Escape then cancels the composition.
+	isComposing?: boolean;
 };
 
 type BeforeInputContents = {
@@ -151,6 +153,7 @@ export function attachAppShortcuts(
 			input.key === "Escape" &&
 			!input.control && !input.meta && !input.shift && !input.alt &&
 			!input.isAutoRepeat &&
+			!input.isComposing &&
 			!isRecording() &&
 			isArtifactEscapeArmed()
 		) {

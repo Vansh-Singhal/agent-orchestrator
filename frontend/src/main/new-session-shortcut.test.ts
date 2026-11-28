@@ -14,6 +14,7 @@ type InputEvent = {
 	alt: boolean;
 	type: "keyDown" | "keyUp";
 	isAutoRepeat?: boolean;
+	isComposing?: boolean;
 };
 
 function fakeSource() {
@@ -597,6 +598,8 @@ describe("attachAppShortcuts", () => {
 			source.emit({ key: "Escape", code: "Escape", ...modifier });
 		}
 		source.emit({ key: "Escape", code: "Escape", isAutoRepeat: true });
+		// Escape that cancels an IME composition in the page is the page's alone.
+		source.emit({ key: "Escape", code: "Escape", isComposing: true });
 		source.emit({ key: "Escape", code: "Escape", type: "keyUp" });
 		recording = true;
 		source.emit({ key: "Escape", code: "Escape" });
